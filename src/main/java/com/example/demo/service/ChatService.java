@@ -1,6 +1,8 @@
 package com.example.demo.service;
 
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
@@ -12,9 +14,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -22,9 +27,11 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+    private static final int MAX_HISTORY_SIZE = 20;
 
     private final ChatLanguageModel model;
     private final StreamingChatLanguageModel streamingModel;
+    private final Map<String, List<ChatMessage>> sessions = new ConcurrentHashMap<>();
 
     public ChatService(ChatLanguageModel model,
                        StreamingChatLanguageModel streamingModel) {
@@ -38,6 +45,29 @@ public class ChatService {
         long costMs = Duration.ofNanos(System.nanoTime() - start).toMillis();
         log.info("llm.chat costMs={} inputChars={} outputChars={}",
                 costMs, safeLen(message), safeLen(output));
+        return output;
+    }
+
+    public String chatWithMemory(String sessionId, String message) {
+        List<ChatMessage> history = sessions.computeIfAbsent(sessionId, k -> new ArrayList<>());
+        history.add(new UserMessage(message));
+
+        long start = System.nanoTime();
+        Response<AiMessage> response = model.generate(history);
+        long costMs = Duration.ofNanos(System.nanoTime() - start).toMillis();
+
+        AiMessage aiMessage = response.content();
+        history.add(aiMessage);
+
+        // Trim history to avoid unbounded growth
+        if (history.size() > MAX_HISTORY_SIZE) {
+            List<ChatMessage> trimmed = new ArrayList<>(history.subList(history.size() - MAX_HISTORY_SIZE, history.size()));
+            sessions.put(sessionId, trimmed);
+        }
+
+        String output = aiMessage.text();
+        log.info("llm.chat.memory costMs={} sessionId={} historySize={} inputChars={} outputChars={}",
+                costMs, sessionId, history.size(), safeLen(message), safeLen(output));
         return output;
     }
 

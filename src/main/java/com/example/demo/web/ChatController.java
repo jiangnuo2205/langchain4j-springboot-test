@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/api")
 public class ChatController {
@@ -24,8 +26,11 @@ public class ChatController {
 
   @PostMapping("/chat")
   public ChatResponse chat(@Valid @RequestBody ChatRequest req) {
-    String output = chatService.chat(req.message());
-    return new ChatResponse(modelName, req.message(), output);
+    String sessionId = (req.sessionId() != null && !req.sessionId().isBlank())
+        ? req.sessionId()
+        : UUID.randomUUID().toString();
+    String output = chatService.chatWithMemory(sessionId, req.message());
+    return new ChatResponse(modelName, req.message(), output, sessionId);
   }
 
   /**
