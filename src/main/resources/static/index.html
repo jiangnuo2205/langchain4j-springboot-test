@@ -21,6 +21,7 @@
         pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,0.08); padding: 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.2); }
         .hint { font-size: 12px; opacity: 0.75; margin-top: 10px; }
         .error { color: #ef4444; }
+
     </style>
 </head>
 <body>
@@ -46,6 +47,8 @@
             <button class="primary" id="sendBtn">发送</button>
             <button id="clearBtn">清空</button>
             <span id="status" class="hint"></span>
+            <button class="primary" id="sendStreamBtn">流式发送</button>
+
         </div>
 
         <label>响应（output）</label>
@@ -134,6 +137,84 @@
     messageEl.addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
     });
+
+    // 流式发送（如果后端支持 SSE 或类似机制）--------------------------------
+    const sendStreamBtn = document.getElementById("sendStreamBtn");
+
+    async function sendStream() {
+        const baseUrl = baseUrlEl.value.trim().replace(/\/+$/, "");
+        const endpoint = "/api/chat/stream";
+        const message = messageEl.value;
+
+        if (!message.trim()) {
+            setStatus("请输入 message", true);
+            return;
+        }
+
+        const url = baseUrl + endpoint;
+
+        sendStreamBtn.disabled = true;
+        setStatus("流式请求中…");
+        outputEl.textContent = "";
+
+        try {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message })
+            });
+
+            if (!res.ok || !res.body) {
+                const text = await res.text();
+                setStatus(`流式请求失败：HTTP ${res.status}`, true);
+                outputEl.textContent = text;
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+
+            // SSE 是 text/event-stream，数据格式类似：
+            // event: token
+            // data: xxx
+            // 空行分隔
+            let buffer = "";
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // 以 "\n\n" 分割事件
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() || "";
+
+                for (const part of parts) {
+                    // 提取 data: 行
+                    const lines = part.split("\n");
+                    for (const line of lines) {
+                        if (line.startsWith("data:")) {
+                            const data = line.slice(5).trim();
+                            if (data === "[DONE]") {
+                                setStatus("完成");
+                                break;
+                            } else {
+                                outputEl.textContent += data;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            setStatus("流式请求异常（可能服务未启动/网络错误）", true);
+            outputEl.textContent = String(e);
+        } finally {
+            sendStreamBtn.disabled = false;
+        }
+    }
+
+    sendStreamBtn.addEventListener("click", sendStream);
 </script>
 </body>
 </html>
