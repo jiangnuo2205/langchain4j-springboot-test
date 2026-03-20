@@ -7,27 +7,29 @@
     <style>
         :root { color-scheme: light dark; }
         body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; margin: 24px; }
-        .wrap { max-width: 900px; margin: 0 auto; }
-        h1 { margin: 0 0 12px; font-size: 20px; }
-        .card { border: 1px solid rgba(127,127,127,0.35); border-radius: 12px; padding: 16px; }
+        .wrap { max-width: 960px; margin: 0 auto; }
+        h1 { margin: 0 0 16px; font-size: 20px; }
+        h2 { font-size: 15px; margin: 0 0 12px; opacity: 0.85; }
+        .card { border: 1px solid rgba(127,127,127,0.35); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
         label { display: block; font-size: 13px; opacity: 0.85; margin: 12px 0 6px; }
         textarea, input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.35); background: transparent; }
-        textarea { min-height: 120px; resize: vertical; }
+        textarea { min-height: 100px; resize: vertical; }
         .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
-        button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.35); background: rgba(127,127,127,0.12); cursor: pointer; }
+        .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+        button { padding: 9px 14px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.35); background: rgba(127,127,127,0.12); cursor: pointer; font-size: 13px; }
         button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
-        pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,0.08); padding: 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.2); }
-        .hint { font-size: 12px; opacity: 0.75; margin-top: 10px; }
+        pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,0.08); padding: 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.2); min-height: 60px; }
+        .hint { font-size: 12px; opacity: 0.75; margin-top: 6px; }
         .error { color: #ef4444; }
-
+        .tag { display: inline-block; font-size: 10px; background: #2563eb22; color: #2563eb; border-radius: 4px; padding: 2px 6px; margin-right: 4px; }
     </style>
 </head>
 <body>
 <div class="wrap">
     <h1>LangChain4j + DashScope（Qwen）测试页</h1>
 
+    <!-- Global settings -->
     <div class="card">
         <div class="row">
             <div>
@@ -35,28 +37,96 @@
                 <input id="baseUrl" value="http://localhost:8090" />
             </div>
             <div>
-                <label for="endpoint">接口路径</label>
-                <input id="endpoint" value="/api/chat" />
+                <label>当前 sessionId（自动生成/复用）</label>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+                    <input id="sessionIdDisplay" placeholder="（首次发送后自动填充）" readonly style="flex:1;opacity:0.75;" />
+                    <button id="clearSessionBtn" title="清除 session，下次请求会新建">清除 Session</button>
+                </div>
             </div>
         </div>
+    </div>
 
-        <label for="message">输入（message）</label>
-        <textarea id="message" placeholder="例如：请用 3 点总结 RAG 的关键要素。"></textarea>
-
+    <!-- 1. Chat (with memory) -->
+    <div class="card">
+        <h2>1. 普通对话（带记忆 /api/chat）</h2>
+        <label for="chatMessage">消息</label>
+        <textarea id="chatMessage" placeholder="例如：你好，我叫张三。"></textarea>
         <div class="actions">
-            <button class="primary" id="sendBtn">发送</button>
-            <button id="clearBtn">清空</button>
-            <span id="status" class="hint"></span>
-            <button class="primary" id="sendStreamBtn">流式发送</button>
-
+            <button class="primary" id="sendChatBtn">发送</button>
+            <button id="clearChatBtn">清空</button>
+            <span id="chatStatus" class="hint"></span>
         </div>
-
-        <label>响应（output）</label>
-        <pre id="output">(等待请求...)</pre>
-
+        <label>响应</label>
+        <pre id="chatOutput">（等待请求...）</pre>
         <div class="hint">
-            说明：此页面会 POST JSON：<code>{"message": "..."}</code> 到 <code>{baseUrl}{endpoint}</code>。<br/>
-            若你改了端口，请同步修改 Base URL（默认你项目端口是 8089）。
+            说明：POST <code>/api/chat</code>，每次请求自动带 sessionId，AI 会记住上下文。
+        </div>
+    </div>
+
+    <!-- 2. Streaming Chat -->
+    <div class="card">
+        <h2>2. 流式对话（/api/chat/stream）</h2>
+        <label for="streamMessage">消息</label>
+        <textarea id="streamMessage" placeholder="例如：用10个字介绍一下你自己。"></textarea>
+        <div class="actions">
+            <button class="primary" id="sendStreamBtn">流式发送</button>
+            <button id="clearStreamBtn">清空</button>
+            <span id="streamStatus" class="hint"></span>
+        </div>
+        <label>响应（流式追加）</label>
+        <pre id="streamOutput">（等待请求...）</pre>
+        <div class="hint">
+            说明：POST <code>/api/chat/stream</code>，以 SSE 方式接收 token。首 token 延迟（TTFT）可在状态栏查看。
+        </div>
+    </div>
+
+    <!-- 3. Agent (Tools) -->
+    <div class="card">
+        <h2>3. 工具调用演示（/api/agent/chat）</h2>
+        <label for="agentMessage">消息</label>
+        <textarea id="agentMessage" placeholder="例如：3 加 7 等于多少？或者：现在几点了？或者：dashscope.model 配置是什么？"></textarea>
+        <div class="actions">
+            <button class="primary" id="sendAgentBtn">发送给 Agent</button>
+            <button id="clearAgentBtn">清空</button>
+            <span id="agentStatus" class="hint"></span>
+        </div>
+        <label>响应</label>
+        <pre id="agentOutput">（等待请求...）</pre>
+        <div class="hint">
+            说明：POST <code>/api/agent/chat</code>，Agent 可调用 <span class="tag">sum(a,b)</span><span class="tag">getTime()</span><span class="tag">getConfig(key)</span> 工具。
+        </div>
+    </div>
+
+    <!-- 4. RAG -->
+    <div class="card">
+        <h2>4. RAG 问答（/api/rag）</h2>
+        <div class="row">
+            <div>
+                <label>重建索引</label>
+                <div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;">
+                    <button class="primary" id="reindexBtn" style="white-space:nowrap;">重建索引</button>
+                    <span id="reindexStatus" class="hint" style="margin-top:4px;"></span>
+                </div>
+                <div class="hint">
+                    需要先在 <code>application-local.properties</code> 配置 <code>rag.docs.dir</code>，然后点击重建索引。
+                </div>
+            </div>
+            <div>
+                <label for="ragQuestion">问题</label>
+                <textarea id="ragQuestion" placeholder="例如：RAG 的关键要素是什么？" style="min-height:60px;"></textarea>
+                <div class="actions">
+                    <button class="primary" id="sendRagBtn">RAG 问答</button>
+                    <button id="clearRagBtn">清空</button>
+                    <span id="ragStatus" class="hint"></span>
+                </div>
+            </div>
+        </div>
+        <label>回答</label>
+        <pre id="ragAnswer">（等待请求...）</pre>
+        <label>召回的文档块</label>
+        <pre id="ragChunks">（等待请求...）</pre>
+        <div class="hint">
+            说明：POST <code>/api/rag/reindex</code> 建立索引，POST <code>/api/rag/ask</code> 检索 topK 块并用 LLM 生成答案。
         </div>
     </div>
 </div>
@@ -64,243 +134,276 @@
 <script>
     const $ = (id) => document.getElementById(id);
 
-    const baseUrlEl = $("baseUrl");
-    const endpointEl = $("endpoint");
-    const messageEl = $("message");
-    const sendBtn = $("sendBtn");
-    const clearBtn = $("clearBtn");
-    const outputEl = $("output");
-    const statusEl = $("status");
+    let currentSessionId = "";
 
-    // 自动使用当前页面 origin，例如 http://localhost:8090
-    if (baseUrlEl && !baseUrlEl.value) {
-        baseUrlEl.value = window.location.origin;
+    function getBaseUrl() {
+        return $("baseUrl").value.trim().replace(/\/+$/, "");
     }
 
-    function setStatus(text, isError=false) {
-        statusEl.textContent = text || "";
-        statusEl.className = "hint" + (isError ? " error" : "");
+    function setSessionId(sid) {
+        currentSessionId = sid || "";
+        $("sessionIdDisplay").value = currentSessionId;
     }
 
-    function appendOutput(s) {
-        outputEl.textContent += s;
+    $("clearSessionBtn").addEventListener("click", () => {
+        setSessionId("");
+    });
+
+    function setStatus(elId, text, isError) {
+        const el = $(elId);
+        if (!el) return;
+        el.textContent = text || "";
+        el.className = "hint" + (isError ? " error" : "");
     }
 
-    alert("clicked");
-    async function send() {
-        const baseUrl = baseUrlEl.value.trim().replace(/\/+$/, "");
-        const endpoint = endpointEl.value.trim().startsWith("/") ? endpointEl.value.trim() : ("/" + endpointEl.value.trim());
-        const message = messageEl.value;
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. Chat with memory
+    // ─────────────────────────────────────────────────────────────────────────
+    $("sendChatBtn").addEventListener("click", async () => {
+        const message = $("chatMessage").value;
+        if (!message.trim()) { setStatus("chatStatus", "请输入 message", true); return; }
 
-        if (!message.trim()) {
-            setStatus("请输入 message", true);
-            return;
-        }
-
-        const url = baseUrl + endpoint;
-
-        sendBtn.disabled = true;
-        setStatus("请求中…");
-        outputEl.textContent = "";
+        $("sendChatBtn").disabled = true;
+        setStatus("chatStatus", "请求中…");
+        $("chatOutput").textContent = "";
 
         try {
-            const res = await fetch(url, {
+            const body = { message };
+            if (currentSessionId) body.sessionId = currentSessionId;
+
+            const res = await fetch(getBaseUrl() + "/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message })
+                body: JSON.stringify(body)
             });
-
             const text = await res.text();
             if (!res.ok) {
-                setStatus(`请求失败：HTTP ${res.status}`, true);
-                outputEl.textContent = text;
+                setStatus("chatStatus", "请求失败：HTTP " + res.status, true);
+                $("chatOutput").textContent = text;
                 return;
             }
-
-            // 尝试解析 JSON（你的后端返回 ChatResponse）
-            try {
-                const json = JSON.parse(text);
-                outputEl.textContent = json.output ?? JSON.stringify(json, null, 2);
-            } catch (e) {
-                // 兜底：如果后端不是 JSON
-                outputEl.textContent = text;
-            }
-
-            setStatus("完成");
+            const json = JSON.parse(text);
+            setSessionId(json.sessionId);
+            $("chatOutput").textContent = json.output != null ? json.output : JSON.stringify(json, null, 2);
+            setStatus("chatStatus", "完成 sessionId=" + (json.sessionId || "-"));
         } catch (e) {
-            setStatus("请求异常（可能是跨域/CORS 或服务未启动）", true);
-            outputEl.textContent = String(e);
+            setStatus("chatStatus", "请求异常：" + e, true);
+            $("chatOutput").textContent = String(e);
         } finally {
-            sendBtn.disabled = false;
+            $("sendChatBtn").disabled = false;
         }
-    }
-
-    sendBtn.addEventListener("click", send);
-    clearBtn.addEventListener("click", () => {
-        messageEl.value = "";
-        outputEl.textContent = "(等待请求...)";
-        setStatus("");
     });
 
-    // Ctrl/Cmd + Enter 发送
-    messageEl.addEventListener("keydown", (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
+    $("clearChatBtn").addEventListener("click", () => {
+        $("chatMessage").value = "";
+        $("chatOutput").textContent = "（等待请求...）";
+        setStatus("chatStatus", "");
     });
 
-    // 流式发送（如果后端支持 SSE 或类似机制）--------------------------------
-    const sendStreamBtn = document.getElementById("sendStreamBtn");
-
-    /**
-     * 解析 SSE block（以 \n\n 分割）
-     * 返回 {event, data}；data 可能有多行 data:，按规范拼接成一个字符串（中间带 \n）
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. Streaming Chat
+    // ─────────────────────────────────────────────────────────────────────────
     function parseSseEventBlock(block) {
         const lines = block.split("\n");
         let eventName = "message";
         const dataLines = [];
-
         for (const rawLine of lines) {
             const line = rawLine.trimEnd();
             if (!line) continue;
-
-            if (line.startsWith("event:")) {
-                eventName = line.slice("event:".length).trim();
-            } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice("data:".length).trimStart());
-            }
-            // 其他字段（id:, retry:）这里暂不处理
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
         }
-
         return { event: eventName, data: dataLines.join("\n") };
     }
 
+    $("sendStreamBtn").addEventListener("click", async () => {
+        const message = $("streamMessage").value;
+        if (!message.trim()) { setStatus("streamStatus", "请输入 message", true); return; }
 
-    async function sendStream() {
-        const baseUrl = baseUrlEl.value.trim().replace(/\/+$/, "");
-        const endpoint = "/api/chat/stream";
-        const message = messageEl.value;
+        $("sendStreamBtn").disabled = true;
+        setStatus("streamStatus", "流式请求中…");
+        $("streamOutput").textContent = "";
 
-        if (!message.trim()) {
-            setStatus("请输入 message", true);
-            return;
-        }
-
-        const url = baseUrl + endpoint;
-
-        sendStreamBtn.disabled = true;
-        sendBtn.disabled = true;
-        setStatus("流式请求中…");
-        outputEl.textContent = "";
-
-        // 统计/状态
-        let requestId = "";
-        let tokenCount = 0;
-        let totalMs = 0;
+        let requestId = "", tokenCount = 0, totalMs = 0, doneSeen = false;
 
         try {
-            const res = await fetch(url, {
+            const res = await fetch(getBaseUrl() + "/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message })
             });
-
             if (!res.ok || !res.body) {
-                const text = await res.text();
-                setStatus(`流式请求失败：HTTP ${res.status}`, true);
-                outputEl.textContent = text;
+                setStatus("streamStatus", "流式请求失败：HTTP " + res.status, true);
+                $("streamOutput").textContent = await res.text();
                 return;
             }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder("utf-8");
-
             let buffer = "";
-            let doneSeen = false;
 
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
-
-                // 按 SSE 事件分隔：空行 \n\n
                 const blocks = buffer.split("\n\n");
                 buffer = blocks.pop() || "";
 
                 for (const block of blocks) {
                     const evt = parseSseEventBlock(block);
-                    const data = evt.data;
-
                     if (evt.event === "meta") {
-                        // 后端发的是 JSON Map（Spring 会序列化成 JSON 字符串）
-                        // 这里尝试 JSON.parse
+                        try { requestId = JSON.parse(evt.data).requestId || requestId; } catch(e) { requestId = evt.data; }
+                        setStatus("streamStatus", "流式中… requestId=" + requestId);
+                    } else if (evt.event === "token") {
+                        tokenCount++;
+                        $("streamOutput").textContent += evt.data;
+                        setStatus("streamStatus", "流式中… requestId=" + (requestId||"-") + " tokens=" + tokenCount);
+                    } else if (evt.event === "stats") {
                         try {
-                            const obj = JSON.parse(data);
-                            requestId = obj.requestId || requestId;
-                        } catch (e) {
-                            // fallback：如果不是 JSON，就直接当字符串
-                            requestId = data || requestId;
-                        }
-                        setStatus(`流式请求中��� requestId=${requestId}`);
-                    }
-
-                    else if (evt.event === "token") {
-                        tokenCount += 1;
-                        appendOutput(data);
-                        // 更新状态（不要太频繁也行，这里简单更新）
-                        setStatus(`流式请求中… requestId=${requestId || "-"} tokenCount=${tokenCount}`);
-                    }
-
-                    else if (evt.event === "stats") {
-                        try {
-                            const obj = JSON.parse(data);
-                            totalMs = obj.totalMs ?? totalMs;
-                            tokenCount = obj.tokenCount ?? tokenCount;
-                            requestId = obj.requestId ?? requestId;
-                        } catch (e) {
-                            // ignore
-                        }
-                    }
-
-                    else if (evt.event === "done") {
-                        if (data === "[DONE]") {
-                            doneSeen = true;
-                            // 不立即 break，让后面可能的 stats 事件也能处理到
-                        }
-                    }
-
-                    else if (evt.event === "error") {
-                        let msg = data;
-                        try {
-                            const obj = JSON.parse(data);
-                            msg = obj.message || msg;
-                            requestId = obj.requestId || requestId;
-                        } catch (e) {}
-                        setStatus(`后端返回错误 requestId=${requestId || "-"}: ${msg}`, true);
+                            const obj = JSON.parse(evt.data);
+                            totalMs = obj.totalMs != null ? obj.totalMs : totalMs;
+                            tokenCount = obj.tokenCount != null ? obj.tokenCount : tokenCount;
+                        } catch(e) {}
+                    } else if (evt.event === "done" && evt.data === "[DONE]") {
+                        doneSeen = true;
+                    } else if (evt.event === "error") {
+                        let msg = evt.data;
+                        try { msg = JSON.parse(evt.data).message || msg; } catch(e) {}
+                        setStatus("streamStatus", "后端错误: " + msg, true);
                     }
                 }
             }
-
             if (doneSeen) {
-                setStatus(`完成 requestId=${requestId || "-"} tokenCount=${tokenCount} totalMs=${totalMs || "-"}`);
+                setStatus("streamStatus", "完成 requestId=" + (requestId||"-") + " tokens=" + tokenCount + (totalMs ? " totalMs=" + totalMs : ""));
             } else {
-                // 连接结束但没看到 done（可能被中断）
-                setStatus(`连接已结束（未收到 done）requestId=${requestId || "-"} tokenCount=${tokenCount}`, true);
+                setStatus("streamStatus", "连接结束（未收到 done）tokens=" + tokenCount, true);
             }
-
         } catch (e) {
-            // 这里是“网络层异常”：端口不通、CORS、连接被中断等
-            setStatus(`流式请求异常：${String(e)}`, true);
-            outputEl.textContent = String(e);
+            setStatus("streamStatus", "流式请求异常：" + e, true);
+            $("streamOutput").textContent = String(e);
         } finally {
-            sendStreamBtn.disabled = false;
-            sendBtn.disabled = false;
+            $("sendStreamBtn").disabled = false;
         }
-    }
+    });
 
-    if (sendStreamBtn) {
-        sendStreamBtn.addEventListener("click", sendStream);
-    }
+    $("clearStreamBtn").addEventListener("click", () => {
+        $("streamMessage").value = "";
+        $("streamOutput").textContent = "（等待请求...）";
+        setStatus("streamStatus", "");
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. Agent (Tools)
+    // ─────────────────────────────────────────────────────────────────────────
+    $("sendAgentBtn").addEventListener("click", async () => {
+        const message = $("agentMessage").value;
+        if (!message.trim()) { setStatus("agentStatus", "请输入 message", true); return; }
+
+        $("sendAgentBtn").disabled = true;
+        setStatus("agentStatus", "请求中…");
+        $("agentOutput").textContent = "";
+
+        try {
+            const res = await fetch(getBaseUrl() + "/api/agent/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message })
+            });
+            const text = await res.text();
+            if (!res.ok) {
+                setStatus("agentStatus", "请求失败：HTTP " + res.status, true);
+                $("agentOutput").textContent = text;
+                return;
+            }
+            const json = JSON.parse(text);
+            $("agentOutput").textContent = json.output != null ? json.output : JSON.stringify(json, null, 2);
+            setStatus("agentStatus", "完成");
+        } catch (e) {
+            setStatus("agentStatus", "请求异常：" + e, true);
+            $("agentOutput").textContent = String(e);
+        } finally {
+            $("sendAgentBtn").disabled = false;
+        }
+    });
+
+    $("clearAgentBtn").addEventListener("click", () => {
+        $("agentMessage").value = "";
+        $("agentOutput").textContent = "（等待请求...）";
+        setStatus("agentStatus", "");
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. RAG
+    // ─────────────────────────────────────────────────────────────────────────
+    $("reindexBtn").addEventListener("click", async () => {
+        $("reindexBtn").disabled = true;
+        setStatus("reindexStatus", "重建索引中…");
+        try {
+            const res = await fetch(getBaseUrl() + "/api/rag/reindex", { method: "POST" });
+            const json = await res.json();
+            setStatus("reindexStatus", "索引完成，chunks=" + (json.chunksIndexed != null ? json.chunksIndexed : JSON.stringify(json)));
+        } catch (e) {
+            setStatus("reindexStatus", "重建失败：" + e, true);
+        } finally {
+            $("reindexBtn").disabled = false;
+        }
+    });
+
+    $("sendRagBtn").addEventListener("click", async () => {
+        const question = $("ragQuestion").value;
+        if (!question.trim()) { setStatus("ragStatus", "请输入问题", true); return; }
+
+        $("sendRagBtn").disabled = true;
+        setStatus("ragStatus", "问答中…");
+        $("ragAnswer").textContent = "";
+        $("ragChunks").textContent = "";
+
+        try {
+            const res = await fetch(getBaseUrl() + "/api/rag/ask", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question })
+            });
+            const text = await res.text();
+            if (!res.ok) {
+                setStatus("ragStatus", "请求失败：HTTP " + res.status, true);
+                $("ragAnswer").textContent = text;
+                return;
+            }
+            const json = JSON.parse(text);
+            $("ragAnswer").textContent = json.answer != null ? json.answer : "(no answer)";
+            const chunks = json.retrievedChunks || [];
+            $("ragChunks").textContent = chunks.length === 0
+                ? "（无召回块，请先重建索引）"
+                : chunks.map((c, i) => "[" + (i+1) + "] " + c).join("\n\n---\n\n");
+            setStatus("ragStatus", "完成，召回 " + chunks.length + " 块");
+        } catch (e) {
+            setStatus("ragStatus", "请求异常：" + e, true);
+            $("ragAnswer").textContent = String(e);
+        } finally {
+            $("sendRagBtn").disabled = false;
+        }
+    });
+
+    $("clearRagBtn").addEventListener("click", () => {
+        $("ragQuestion").value = "";
+        $("ragAnswer").textContent = "（等待请求...）";
+        $("ragChunks").textContent = "（等待请求...）";
+        setStatus("ragStatus", "");
+    });
+
+    // Ctrl/Cmd+Enter to submit from any textarea
+    document.querySelectorAll("textarea").forEach(function(ta) {
+        ta.addEventListener("keydown", function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                var id = ta.id;
+                if (id === "chatMessage")        $("sendChatBtn").click();
+                else if (id === "streamMessage") $("sendStreamBtn").click();
+                else if (id === "agentMessage")  $("sendAgentBtn").click();
+                else if (id === "ragQuestion")   $("sendRagBtn").click();
+            }
+        });
+    });
 </script>
 </body>
 </html>
