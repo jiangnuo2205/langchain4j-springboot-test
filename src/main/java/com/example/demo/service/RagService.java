@@ -14,12 +14,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 @Service
@@ -35,6 +37,17 @@ public class RagService {
 
     private volatile InMemoryEmbeddingStore<TextSegment> store = new InMemoryEmbeddingStore<>();
 
+    // 新增：用于 /api/rag/stats 的“索引元数据快照”
+    public record IndexedChunkMeta(
+            String id,
+            String text,
+            int vectorDim,
+            long estimatedVectorBytes,
+            long estimatedTextBytesUtf8
+    ) {}
+
+    private volatile List<IndexedChunkMeta> indexedMetas = List.of();
+
     public RagService(
             EmbeddingModel embeddingModel,
             ChatLanguageModel chatModel,
@@ -48,6 +61,33 @@ public class RagService {
         this.topK = topK;
     }
 
+    /** 新增：stats */
+    public Map<String, Object> stats(int topN) {
+        int n = Math.max(0, Math.min(topN, 200));
+        List<IndexedChunkMeta> metas = this.indexedMetas;
+
+        int chunks = metas.size();
+        int vectorDimMax = 0;
+        long vectorBytes = 0L;
+        long textBytes = 0L;
+
+        for (IndexedChunkMeta m : metas) {
+            vectorDimMax = Math.max(vectorDimMax, m.vectorDim());
+            vectorBytes += m.estimatedVectorBytes();
+            textBytes += m.estimatedTextBytesUtf8();
+        }
+
+        List<String> firstIds = metas.stream().limit(n).map(IndexedChunkMeta::id).toList();
+
+        return Map.of(
+                "chunks", chunks,
+                "vectorDimMax", vectorDimMax,
+                "estimatedVectorBytes", vectorBytes,
+                "estimatedTextBytesUtf8", textBytes,
+                "firstIds", firstIds
+        );
+    }
+
     /**
      * Rebuild the index: scan docsDir for .txt and .md files, chunk content, embed and store.
      * @return number of chunks indexed
@@ -55,36 +95,46 @@ public class RagService {
     public int reindex() {
         if (docsDir == null || docsDir.isBlank()) {
             log.warn("rag.docs.dir is not configured – nothing to index");
+            store = new InMemoryEmbeddingStore<>();
+            indexedMetas = List.of();
             return 0;
         }
 
         Path dir = Paths.get(docsDir);
         if (!Files.isDirectory(dir)) {
             log.warn("rag.docs.dir={} is not a directory", docsDir);
+            store = new InMemoryEmbeddingStore<>();
+            indexedMetas = List.of();
             return 0;
         }
 
+        // 改动：我们同时维护 chunk 的 id
         List<TextSegment> allChunks = new ArrayList<>();
+        List<String> allChunkIds = new ArrayList<>();
+
         try (Stream<Path> paths = Files.walk(dir)) {
             paths.filter(Files::isRegularFile)
-                 .filter(p -> {
-                     String name = p.getFileName().toString().toLowerCase();
-                     return name.endsWith(".txt") || name.endsWith(".md");
-                 })
-                 .forEach(file -> {
-                     try {
-                         String content = Files.readString(file);
-                         List<String> chunks = chunkText(content);
-                         String fileName = dir.relativize(file).toString();
-                         for (String chunk : chunks) {
-                             allChunks.add(TextSegment.from(chunk));
-                             log.debug("rag.reindex chunk file={} chunkLen={}", fileName, chunk.length());
-                         }
-                         log.info("rag.reindex file={} chunks={}", fileName, chunks.size());
-                     } catch (IOException e) {
-                         log.error("rag.reindex failed to read file={} err={}", file, e.getMessage());
-                     }
-                 });
+                    .filter(p -> {
+                        String name = p.getFileName().toString().toLowerCase();
+                        return name.endsWith(".txt") || name.endsWith(".md");
+                    })
+                    .forEach(file -> {
+                        try {
+                            String content = Files.readString(file);
+                            List<String> chunks = chunkText(content);
+                            String fileName = dir.relativize(file).toString();
+
+                            for (int i = 0; i < chunks.size(); i++) {
+                                String chunk = chunks.get(i);
+                                allChunks.add(TextSegment.from(chunk));
+                                allChunkIds.add(fileName + "#chunk=" + i);
+                                log.debug("rag.reindex chunk file={} chunkIndex={} chunkLen={}", fileName, i, chunk.length());
+                            }
+                            log.info("rag.reindex file={} chunks={}", fileName, chunks.size());
+                        } catch (IOException e) {
+                            log.error("rag.reindex failed to read file={} err={}", file, e.getMessage());
+                        }
+                    });
         } catch (IOException e) {
             log.error("rag.reindex walk failed dir={} err={}", docsDir, e.getMessage());
             return 0;
@@ -93,6 +143,7 @@ public class RagService {
         if (allChunks.isEmpty()) {
             log.info("rag.reindex no chunks found in dir={}", docsDir);
             store = new InMemoryEmbeddingStore<>();
+            indexedMetas = List.of();
             return 0;
         }
 
@@ -103,6 +154,22 @@ public class RagService {
         InMemoryEmbeddingStore<TextSegment> newStore = new InMemoryEmbeddingStore<>();
         newStore.addAll(embeddings, allChunks);
         this.store = newStore;
+
+        // 新增：构建元数据快照（用于 stats）
+        List<IndexedChunkMeta> metas = new ArrayList<>(allChunks.size());
+        for (int i = 0; i < allChunks.size(); i++) {
+            String id = allChunkIds.get(i);
+            String text = allChunks.get(i).text();
+
+            Embedding emb = (embeddings != null && i < embeddings.size()) ? embeddings.get(i) : null;
+            int dim = (emb == null || emb.vector() == null) ? 0 : emb.vector().length;
+
+            long vecBytes = (long) dim * 4L; // float 数据本体估算
+            long txtBytes = (text == null) ? 0L : text.getBytes(StandardCharsets.UTF_8).length;
+
+            metas.add(new IndexedChunkMeta(id, text, dim, vecBytes, txtBytes));
+        }
+        this.indexedMetas = List.copyOf(metas);
 
         log.info("rag.reindex done dir={} chunks={}", docsDir, allChunks.size());
         return allChunks.size();
