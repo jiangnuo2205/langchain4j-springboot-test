@@ -135,8 +135,23 @@ chroma.base-url=http://localhost:8000
 chroma.collection=rag-default
 ```
 
+> **Chroma v2 API:** This project uses **LangChain4j ≥ 1.7.1** which targets the Chroma v2 REST API
+> (`/api/v2/...` endpoints). Set `chroma.base-url` to the root of your Chroma server
+> (e.g. `http://localhost:8000`); the `/api/v2` path prefix is handled automatically by the library.
+>
+> **Chroma 1.0.0 or later is required.** Older Chroma servers (< 1.0.0) that only expose the v1 API
+> are not compatible with this configuration.
+
 > **Important:** Use different collection names per embedding provider to avoid mixing vector spaces.
 > E.g., `chroma.collection=rag-dashscope` vs `chroma.collection=rag-ollama`.
+
+### Troubleshooting Chroma connection errors
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `405 Method Not Allowed` or `404 Not Found` when starting with `vector.store=chroma` | Chroma server version < 1.0.0 (exposes only v1 API) | Upgrade Chroma: `pip install --upgrade chromadb` |
+| `Connection refused` | Chroma is not running | Start it: `chroma run --host 0.0.0.0 --port 8000 --path ./chroma-data` |
+| Bean creation error for `EmbeddingStore` on startup | `vector.store` property not resolved | Ensure `application-local.properties` or env var `VECTOR_STORE=chroma` is set |
 
 ---
 

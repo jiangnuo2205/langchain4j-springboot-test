@@ -3,10 +3,10 @@ package com.example.demo.service;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,19 +29,19 @@ public class ChatService {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
     private static final int MAX_HISTORY_SIZE = 20;
 
-    private final ChatLanguageModel model;
-    private final StreamingChatLanguageModel streamingModel;
+    private final ChatModel model;
+    private final StreamingChatModel streamingModel;
     private final Map<String, List<ChatMessage>> sessions = new ConcurrentHashMap<>();
 
-    public ChatService(ChatLanguageModel model,
-                       StreamingChatLanguageModel streamingModel) {
+    public ChatService(ChatModel model,
+                       StreamingChatModel streamingModel) {
         this.model = model;
         this.streamingModel = streamingModel;
     }
 
     public String chat(String message) {
         long start = System.nanoTime();
-        String output = model.generate(message);
+        String output = model.chat(message);
         long costMs = Duration.ofNanos(System.nanoTime() - start).toMillis();
         log.info("llm.chat costMs={} inputChars={} outputChars={}",
                 costMs, safeLen(message), safeLen(output));
@@ -53,10 +53,10 @@ public class ChatService {
         history.add(new UserMessage(message));
 
         long start = System.nanoTime();
-        Response<AiMessage> response = model.generate(history);
+        ChatResponse response = model.chat(history);
         long costMs = Duration.ofNanos(System.nanoTime() - start).toMillis();
 
-        AiMessage aiMessage = response.content();
+        AiMessage aiMessage = response.aiMessage();
         history.add(aiMessage);
 
         // Trim history to avoid unbounded growth
@@ -96,10 +96,10 @@ public class ChatService {
 
         CompletableFuture.runAsync(() -> {
             try {
-                streamingModel.generate(message, new StreamingResponseHandler<AiMessage>() {
+                streamingModel.chat(message, new StreamingChatResponseHandler() {
 
                     @Override
-                    public void onNext(String token) {
+                    public void onPartialResponse(String token) {
                         int n = tokenCount.incrementAndGet();
 
                         long now = System.nanoTime();
@@ -120,9 +120,9 @@ public class ChatService {
                     }
 
                     @Override
-                    public void onComplete(Response<AiMessage> response) {
+                    public void onCompleteResponse(ChatResponse response) {
                         long totalMs = Duration.ofNanos(System.nanoTime() - startNs).toMillis();
-                        String fullText = (response == null || response.content() == null) ? null : response.content().text();
+                        String fullText = (response == null || response.aiMessage() == null) ? null : response.aiMessage().text();
 
                         log.info("llm.stream done totalMs={} requestId={} tokenCount={} outputChars={}",
                                 totalMs, requestId, tokenCount.get(), safeLen(fullText));

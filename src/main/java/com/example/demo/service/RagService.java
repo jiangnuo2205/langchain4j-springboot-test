@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
@@ -32,7 +32,7 @@ public class RagService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final EmbeddingModel embeddingModel;
-    private final ChatLanguageModel chatModel;
+    private final ChatModel chatModel;
     private final EmbeddingStore<TextSegment> embeddingStore;
     private final String docsDir;
     private final int chunkMaxChars;
@@ -64,7 +64,7 @@ public class RagService {
 
     public RagService(
             EmbeddingModel embeddingModel,
-            ChatLanguageModel chatModel,
+            ChatModel chatModel,
             EmbeddingStore<TextSegment> embeddingStore,
             @Value("${rag.docs.dir:}") String docsDir,
             @Value("${rag.chunk.maxChars:500}") int chunkMaxChars,
@@ -335,7 +335,7 @@ public class RagService {
     public String ask(String question) {
         List<Map<String, Object>> results = retrieveWithScores(question);
         if (results.isEmpty()) {
-            return chatModel.generate(question);
+            return chatModel.chat(question);
         }
 
         List<Map<String, Object>> contextResults = rerankEnabled
@@ -354,7 +354,7 @@ public class RagService {
                 + "Context:\n" + context
                 + "Question: " + question;
 
-        return chatModel.generate(prompt);
+        return chatModel.chat(prompt);
     }
 
     /**
@@ -379,7 +379,7 @@ public class RagService {
         sb.append("JSON array:");
 
         try {
-            String response = chatModel.generate(sb.toString());
+            String response = chatModel.chat(sb.toString());
             // Extract JSON array from response
             int start = response.indexOf('[');
             int end = response.lastIndexOf(']');
