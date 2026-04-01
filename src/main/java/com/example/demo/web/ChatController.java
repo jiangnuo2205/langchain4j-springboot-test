@@ -16,12 +16,14 @@ import java.util.UUID;
 public class ChatController {
 
   private final ChatService chatService;
-  private final String modelName;
+  private final String displayModel;
 
   public ChatController(ChatService chatService,
-                        @Value("${dashscope.model:qwen-turbo}") String modelName) {
+                        @Value("${dashscope.model:qwen-turbo}") String dashscopeModel,
+                        @Value("${ollama.chat-model:qwen3:4b}") String ollamaModel,
+                        @Value("${llm.provider:dashscope}") String llmProvider) {
     this.chatService = chatService;
-    this.modelName = modelName;
+    this.displayModel = "ollama".equals(llmProvider) ? ollamaModel : dashscopeModel;
   }
 
   @PostMapping("/chat")
@@ -30,7 +32,7 @@ public class ChatController {
         ? req.sessionId()
         : UUID.randomUUID().toString();
     String output = chatService.chatWithMemory(sessionId, req.message());
-    return new ChatResponse(modelName, req.message(), output, sessionId);
+    return new ChatResponse(displayModel, req.message(), output, sessionId);
   }
 
   /**

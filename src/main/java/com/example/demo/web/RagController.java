@@ -15,14 +15,13 @@ import java.util.Map;
 @RequestMapping("/api/rag")
 public class RagController {
 
+    private static final Logger log = LoggerFactory.getLogger(RagController.class);
+
     private final RagService ragService;
 
     public RagController(RagService ragService) {
         this.ragService = ragService;
     }
-
-    // 类里加
-    private static final Logger log = LoggerFactory.getLogger(RagController.class);
 
     @PostMapping("/reindex")
     public Map<String, Object> reindex() {
@@ -35,6 +34,22 @@ public class RagController {
         List<String> chunks = ragService.retrieve(req.question());
         String answer = ragService.ask(req.question());
         return new RagAskResponse(req.question(), answer, chunks);
+    }
+
+    /**
+     * Debug retrieval quality: returns topK matches with scores and metadata.
+     * GET /api/rag/search?q=your+question&amp;k=5  (k overrides default topK when &gt; 0)
+     */
+    @GetMapping("/search")
+    public Map<String, Object> search(
+            @RequestParam(name = "q") String question,
+            @RequestParam(name = "k", defaultValue = "0") int k) {
+        List<Map<String, Object>> results = ragService.retrieveWithScores(question, k > 0 ? k : null);
+        log.info("rag.search question='{}' k={} results={}", question, k, results.size());
+        return Map.of(
+                "question", question,
+                "results", results
+        );
     }
 
     @GetMapping("/stats")

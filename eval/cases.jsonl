@@ -1,0 +1,5 @@
+{"id": "c01", "question": "小龙虾叫什么名字？", "relevant": ["sample"], "ask": false}
+{"id": "c02", "question": "这个文档是测试用的吗？", "relevant": ["sample"], "ask": false}
+{"id": "c03", "question": "作者喜欢喝什么咖啡？", "relevant": ["sample"], "ask": false}
+{"id": "c04", "question": "什么是 RAG？", "relevant": ["rag-intro"], "ask": false}
+{"id": "c05", "question": "如何配置 Ollama？", "relevant": ["ollama"], "ask": false}

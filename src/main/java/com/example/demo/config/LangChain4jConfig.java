@@ -6,15 +6,24 @@ import dev.langchain4j.model.dashscope.QwenChatModel;
 import dev.langchain4j.model.dashscope.QwenEmbeddingModel;
 import dev.langchain4j.model.dashscope.QwenStreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Duration;
 
 @Configuration
 public class LangChain4jConfig {
 
+  // ── DashScope ChatLanguageModel (default) ──────────────────────────────────
+
   @Bean
-  ChatLanguageModel chatLanguageModel(
+  @ConditionalOnProperty(name = "llm.provider", havingValue = "dashscope", matchIfMissing = true)
+  ChatLanguageModel dashscopeChatLanguageModel(
           @Value("${dashscope.api-key}") String apiKey,
           @Value("${dashscope.model:qwen-turbo}") String modelName,
           @Value("${dashscope.temperature:0.7}") double temperature
@@ -22,12 +31,13 @@ public class LangChain4jConfig {
     return QwenChatModel.builder()
             .apiKey(apiKey)
             .modelName(modelName)
-            .temperature((float)temperature)
+            .temperature((float) temperature)
             .build();
   }
 
   @Bean
-  StreamingChatLanguageModel streamingChatLanguageModel(
+  @ConditionalOnProperty(name = "llm.provider", havingValue = "dashscope", matchIfMissing = true)
+  StreamingChatLanguageModel dashscopeStreamingChatLanguageModel(
           @Value("${dashscope.api-key}") String apiKey,
           @Value("${dashscope.model:qwen-turbo}") String modelName,
           @Value("${dashscope.temperature:0.7}") double temperature
@@ -35,18 +45,67 @@ public class LangChain4jConfig {
     return QwenStreamingChatModel.builder()
             .apiKey(apiKey)
             .modelName(modelName)
-            .temperature((float)temperature)
+            .temperature((float) temperature)
             .build();
   }
 
   @Bean
-  EmbeddingModel embeddingModel(
+  @ConditionalOnProperty(name = "embedding.provider", havingValue = "dashscope", matchIfMissing = true)
+  EmbeddingModel dashscopeEmbeddingModel(
           @Value("${dashscope.api-key}") String apiKey,
           @Value("${dashscope.embedding-model:text-embedding-v2}") String modelName
   ) {
     return QwenEmbeddingModel.builder()
             .apiKey(apiKey)
             .modelName(modelName)
+            .build();
+  }
+
+  // ── Ollama ChatLanguageModel ────────────────────────────────────────────────
+
+  @Bean
+  @ConditionalOnProperty(name = "llm.provider", havingValue = "ollama")
+  ChatLanguageModel ollamaChatLanguageModel(
+          @Value("${ollama.base-url:http://localhost:11434}") String baseUrl,
+          @Value("${ollama.chat-model:qwen3:4b}") String modelName,
+          @Value("${ollama.temperature:0.7}") double temperature,
+          @Value("${ollama.timeout:60}") long timeoutSeconds
+  ) {
+    return OllamaChatModel.builder()
+            .baseUrl(baseUrl)
+            .modelName(modelName)
+            .temperature(temperature)
+            .timeout(Duration.ofSeconds(timeoutSeconds))
+            .build();
+  }
+
+  @Bean
+  @ConditionalOnProperty(name = "llm.provider", havingValue = "ollama")
+  StreamingChatLanguageModel ollamaStreamingChatLanguageModel(
+          @Value("${ollama.base-url:http://localhost:11434}") String baseUrl,
+          @Value("${ollama.chat-model:qwen3:4b}") String modelName,
+          @Value("${ollama.temperature:0.7}") double temperature,
+          @Value("${ollama.timeout:60}") long timeoutSeconds
+  ) {
+    return OllamaStreamingChatModel.builder()
+            .baseUrl(baseUrl)
+            .modelName(modelName)
+            .temperature(temperature)
+            .timeout(Duration.ofSeconds(timeoutSeconds))
+            .build();
+  }
+
+  @Bean
+  @ConditionalOnProperty(name = "embedding.provider", havingValue = "ollama")
+  EmbeddingModel ollamaEmbeddingModel(
+          @Value("${ollama.base-url:http://localhost:11434}") String baseUrl,
+          @Value("${ollama.embedding-model:nomic-embed-text}") String modelName,
+          @Value("${ollama.timeout:60}") long timeoutSeconds
+  ) {
+    return OllamaEmbeddingModel.builder()
+            .baseUrl(baseUrl)
+            .modelName(modelName)
+            .timeout(Duration.ofSeconds(timeoutSeconds))
             .build();
   }
 }
