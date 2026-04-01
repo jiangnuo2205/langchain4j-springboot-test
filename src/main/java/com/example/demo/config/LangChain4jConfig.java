@@ -53,7 +53,7 @@ public class LangChain4jConfig {
   @ConditionalOnProperty(name = "embedding.provider", havingValue = "dashscope", matchIfMissing = true)
   EmbeddingModel dashscopeEmbeddingModel(
           @Value("${dashscope.api-key}") String apiKey,
-          @Value("${dashscope.embedding-model:text-embedding-v2}") String modelName
+          @Value("${dashscope.embedding-model:text-embedding-v3}") String modelName
   ) {
     return QwenEmbeddingModel.builder()
             .apiKey(apiKey)

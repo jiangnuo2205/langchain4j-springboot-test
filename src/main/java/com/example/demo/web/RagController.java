@@ -55,8 +55,8 @@ public class RagController {
     @GetMapping("/stats")
     public Map<String, Object> stats(@RequestParam(name = "n", defaultValue = "10") int n) {
         Map<String, Object> s = ragService.stats(n);
-        log.info("rag.stats called n={} chunks={} vectorDimMax={} estimatedVectorBytes={} estimatedTextBytesUtf8={}",
-                n, s.get("chunks"), s.get("vectorDimMax"), s.get("estimatedVectorBytes"), s.get("estimatedTextBytesUtf8"));
+        log.info("rag.stats called n={} chunks={} vectorDimMax={} estimatedVectorBytes={} estimatedTextBytesUtf8={} maxChunksPerFile={} batchSize={} skipHugeFiles={}",
+                n, s.get("chunks"), s.get("vectorDimMax"), s.get("estimatedVectorBytes"), s.get("estimatedTextBytesUtf8"), s.get("maxChunksPerFile"), s.get("batchSize"), s.get("skipHugeFiles"));
         return s;
     }
 }

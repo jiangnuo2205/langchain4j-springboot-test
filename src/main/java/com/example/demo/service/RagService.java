@@ -43,6 +43,10 @@ public class RagService {
     private final String llmProvider;
     private final String embeddingProvider;
     private final String vectorStore;
+    private final int maxChunksPerFile;
+    private final int batchSize;
+    private final boolean skipHugeFiles;
+
 
     // Metadata snapshot for /api/rag/stats (no heap dump needed)
     public record IndexedChunkMeta(
@@ -70,7 +74,12 @@ public class RagService {
             @Value("${rag.rerank.topN:2}") int rerankTopN,
             @Value("${llm.provider:dashscope}") String llmProvider,
             @Value("${embedding.provider:dashscope}") String embeddingProvider,
-            @Value("${vector.store:inmemory}") String vectorStore) {
+            @Value("${vector.store:inmemory}") String vectorStore,
+            @Value("${rag.index.maxChunksPerFile}") int maxChunksPerFile,
+            @Value("${rag.index.batchSize}") int batchSize,
+            @Value("${rag.index.skipHugeFiles.enabled}") boolean skipHugeFiles
+
+    ) {
         this.embeddingModel = embeddingModel;
         this.chatModel = chatModel;
         this.embeddingStore = embeddingStore;
@@ -83,6 +92,9 @@ public class RagService {
         this.llmProvider = llmProvider;
         this.embeddingProvider = embeddingProvider;
         this.vectorStore = vectorStore;
+        this.maxChunksPerFile = maxChunksPerFile;
+        this.batchSize = batchSize;
+        this.skipHugeFiles = skipHugeFiles;
     }
 
     /** Stats: index state summary for observability without heap dumps. */
@@ -113,6 +125,9 @@ public class RagService {
         result.put("embeddingProvider", embeddingProvider);
         result.put("vectorStore", vectorStore);
         result.put("rerankEnabled", rerankEnabled);
+        result.put("maxChunksPerFile", maxChunksPerFile);
+        result.put("batchSize", batchSize);
+        result.put("skipHugeFiles", skipHugeFiles);
         return result;
     }
 
@@ -149,9 +164,16 @@ public class RagService {
                     .sorted()
                     .forEach(file -> {
                         try {
+
+                            log.info("rag.reindex processing filename={}", file.getFileName());
                             String content = Files.readString(file);
                             List<String> chunks = chunkText(content);
                             String fileName = dir.relativize(file).toString();
+
+                            if (skipHugeFiles && chunks.size() > maxChunksPerFile) {
+                                log.warn("rag.reindex skip huge file={} chunks={}", fileName, chunks.size());
+                                return;
+                            }
 
                             for (int i = 0; i < chunks.size(); i++) {
                                 String chunk = chunks.get(i);
@@ -161,6 +183,11 @@ public class RagService {
                                         "chunkIndex", String.valueOf(i),
                                         "chunkStrategy", "paragraph"
                                 ));
+                                log.debug("rag.reindex chunk meta file={} chunkIndex={} meta={}", fileName, i, meta);
+                                if (chunk == null || chunk.isBlank()) {
+                                    log.warn("rag.reindex skip blank chunk file={} chunkIndex={}", fileName, i);
+                                    continue;
+                                }
                                 allChunks.add(TextSegment.from(chunk, meta));
                                 allChunkIds.add(fileName + "#chunk=" + i);
                                 log.debug("rag.reindex chunk file={} chunkIndex={} chunkLen={}", fileName, i, chunk.length());
@@ -183,10 +210,28 @@ public class RagService {
         }
 
         // Embed all chunks
-        Response<List<Embedding>> embResponse = embeddingModel.embedAll(allChunks);
-        List<Embedding> embeddings = embResponse.content();
+        log.info("rag.reindex embedding start chunks={}", allChunks.size());
+//        Response<List<Embedding>> embResponse = embeddingModel.embedAll(allChunks);
 
-        embeddingStore.addAll(embeddings, allChunks);
+
+        //batchSize从配置文件获取
+        int batchSize = this.batchSize;
+        List<Embedding> embeddings = new ArrayList<>();
+        for (int start = 0; start < allChunks.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, allChunks.size());
+            List<TextSegment> batch = allChunks.subList(start, end);
+            Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
+            log.info("rag.reindex embedding done chunks={} embeddings={}", allChunks.size(), resp.content().size());
+
+            embeddings.addAll(resp.content());
+            embeddingStore.addAll(resp.content(), batch); // 或 chromaStore.addAll
+            log.info("rag.reindex embedded {} / {}", end, allChunks.size());
+        }
+
+//        log.info("rag.reindex embedding done chunks={} embeddings={}", allChunks.size(), embResponse.content().size());
+        log.info("rag.reindex storing embeddings chunks={} embeddings={}", allChunks.size(), embeddings.size());
+//        List<Embedding> embeddings = embResponse.content();
+//        embeddingStore.addAll(embeddings, allChunks);
 
         // Build metadata snapshot for stats
         List<IndexedChunkMeta> metas = new ArrayList<>(allChunks.size());
@@ -386,6 +431,10 @@ public class RagService {
 
             if (trimmed.length() > chunkMaxChars) {
                 if (current.length() > 0) {
+                    if (current == null ) {
+                        log.warn("Skipping empty chunk while processing text: '{}'", current);
+                        continue;
+                    }
                     chunks.add(current.toString().strip());
                     current = new StringBuilder();
                 }

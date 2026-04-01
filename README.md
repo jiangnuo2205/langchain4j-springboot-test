@@ -77,7 +77,7 @@ dashscope.api-key=sk-...
 dashscope.model=qwen-turbo
 dashscope.model.strong=qwen-plus
 dashscope.temperature=0.7
-dashscope.embedding-model=text-embedding-v2
+dashscope.embedding-model=text-embedding-v3
 ```
 
 Switch to strong model:
@@ -232,7 +232,7 @@ Results are written to `eval/results.csv` and a summary table is printed to stdo
 
 | Dimension | Option A | Option B |
 |-----------|----------|----------|
-| **Embedding** | DashScope `text-embedding-v2` | Ollama `nomic-embed-text` |
+| **Embedding** | DashScope `text-embedding-v3` | Ollama `nomic-embed-text` |
 | **Chat** | DashScope `qwen-turbo` | Ollama `qwen3:4b` |
 | **Strong Chat** | DashScope `qwen-plus` | — |
 | **Vector Store** | InMemory | Chroma |
