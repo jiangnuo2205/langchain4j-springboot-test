@@ -1,68 +1,83 @@
 package com.example.demo.web;
 
+import com.example.demo.service.RagService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.FileWriter;
-import java.util.List;
 import java.util.ArrayList;
-import com.example.demo.service.RagService;
-import com.example.demo.model.EvalCase;
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/eval")
 public class EvalController {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Autowired
     private RagService ragService;
 
     @PostMapping("/run")
     public String runEval(@RequestParam int k) {
-        List<EvalCase> evalCases = readEvalCases("eval/cases.jsonl");
+        List<Map<String, Object>> evalCases = readEvalCases("eval/cases.jsonl");
         int total = evalCases.size();
+        if (total == 0) {
+            return "{\"error\": \"No eval cases found in eval/cases.jsonl\"}";
+        }
         int hit = 0;
         List<String> missIds = new ArrayList<>();
         long start = System.currentTimeMillis();
 
-        for (EvalCase evalCase : evalCases) {
-            // Perform retrieval
-            String query = evalCase.getQuery();
-            var results = ragService.retrieveWithScores(query, k);
+        for (Map<String, Object> evalCase : evalCases) {
+            String id = (String) evalCase.getOrDefault("id", "?");
+            String question = (String) evalCase.getOrDefault("question", "");
+            @SuppressWarnings("unchecked")
+            List<String> relevant = (List<String>) evalCase.getOrDefault("relevant", List.of());
+
+            List<Map<String, Object>> results = ragService.retrieveWithScores(question, k);
             boolean foundHit = false;
 
-            for (var result : results) {
-                if (result.getMetadata().getDocId().equals(evalCase.getGoldDocId())) {
+            for (Map<String, Object> result : results) {
+                String sourceId = (String) result.get("sourceId");
+                if (sourceId != null && relevant.stream().anyMatch(sourceId::contains)) {
                     foundHit = true;
-                    hit++;
                     break;
                 }
             }
 
-            if (!foundHit) {
-                missIds.add(evalCase.getId());
+            if (foundHit) {
+                hit++;
+            } else {
+                missIds.add(id);
             }
         }
 
         long avgMs = (System.currentTimeMillis() - start) / total;
         writeResultsCSV(hit, total, avgMs, missIds);
 
-        return String.format("{\"k\": %d, \"total\": %d, \"hit\": %d, \"recall\": %.2f, \"avgMs\": %d, \"missIds\": %s, \"outputPath\": \"eval/results.csv\"}", k, total, hit, (double) hit / total, avgMs, missIds);
+        return String.format(
+                "{\"k\": %d, \"total\": %d, \"hit\": %d, \"recall\": %.2f, \"avgMs\": %d, \"missIds\": %s, \"outputPath\": \"eval/results.csv\"}",
+                k, total, hit, (double) hit / total, avgMs, missIds);
     }
 
-    private List<EvalCase> readEvalCases(String filePath) {
-        List<EvalCase> evalCases = new ArrayList<>();
+    private List<Map<String, Object>> readEvalCases(String filePath) {
+        List<Map<String, Object>> cases = new ArrayList<>();
         try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
             String line;
             while ((line = br.readLine()) != null) {
-                evalCases.add(new Gson().fromJson(line, EvalCase.class));
+                line = line.strip();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                cases.add(MAPPER.readValue(line, new TypeReference<>() {}));
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return evalCases;
+        return cases;
     }
 
     private void writeResultsCSV(int hit, int total, long avgMs, List<String> missIds) {

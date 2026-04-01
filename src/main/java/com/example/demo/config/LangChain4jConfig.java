@@ -1,10 +1,10 @@
 package com.example.demo.config;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.dashscope.QwenChatModel;
-import dev.langchain4j.model.dashscope.QwenEmbeddingModel;
-import dev.langchain4j.model.dashscope.QwenStreamingChatModel;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.community.model.dashscope.QwenChatModel;
+import dev.langchain4j.community.model.dashscope.QwenEmbeddingModel;
+import dev.langchain4j.community.model.dashscope.QwenStreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
@@ -23,7 +23,7 @@ public class LangChain4jConfig {
 
   @Bean
   @ConditionalOnProperty(name = "llm.provider", havingValue = "dashscope", matchIfMissing = true)
-  ChatLanguageModel dashscopeChatLanguageModel(
+  ChatModel dashscopeChatLanguageModel(
           @Value("${dashscope.api-key}") String apiKey,
           @Value("${dashscope.model:qwen-turbo}") String modelName,
           @Value("${dashscope.temperature:0.7}") double temperature
@@ -37,7 +37,7 @@ public class LangChain4jConfig {
 
   @Bean
   @ConditionalOnProperty(name = "llm.provider", havingValue = "dashscope", matchIfMissing = true)
-  StreamingChatLanguageModel dashscopeStreamingChatLanguageModel(
+  StreamingChatModel dashscopeStreamingChatLanguageModel(
           @Value("${dashscope.api-key}") String apiKey,
           @Value("${dashscope.model:qwen-turbo}") String modelName,
           @Value("${dashscope.temperature:0.7}") double temperature
@@ -65,7 +65,7 @@ public class LangChain4jConfig {
 
   @Bean
   @ConditionalOnProperty(name = "llm.provider", havingValue = "ollama")
-  ChatLanguageModel ollamaChatLanguageModel(
+  ChatModel ollamaChatLanguageModel(
           @Value("${ollama.base-url:http://localhost:11434}") String baseUrl,
           @Value("${ollama.chat-model:qwen3:4b}") String modelName,
           @Value("${ollama.temperature:0.7}") double temperature,
@@ -81,7 +81,7 @@ public class LangChain4jConfig {
 
   @Bean
   @ConditionalOnProperty(name = "llm.provider", havingValue = "ollama")
-  StreamingChatLanguageModel ollamaStreamingChatLanguageModel(
+  StreamingChatModel ollamaStreamingChatLanguageModel(
           @Value("${ollama.base-url:http://localhost:11434}") String baseUrl,
           @Value("${ollama.chat-model:qwen3:4b}") String modelName,
           @Value("${ollama.temperature:0.7}") double temperature,
