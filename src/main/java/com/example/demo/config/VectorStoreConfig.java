@@ -2,6 +2,7 @@ package com.example.demo.config;
 
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +26,7 @@ public class VectorStoreConfig {
           @Value("${chroma.collection:rag-default}") String collectionName
   ) {
     return ChromaEmbeddingStore.builder()
+            .apiVersion(ChromaApiVersion.V2)
             .baseUrl(baseUrl)
             .collectionName(collectionName)
             .build();
