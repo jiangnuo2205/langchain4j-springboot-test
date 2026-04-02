@@ -224,33 +224,6 @@ public class RagService {
         List<Embedding> embeddings = new ArrayList<>();
         for (int start = 0; start < allChunks.size(); start += batchSize) {
             int end = Math.min(start + batchSize, allChunks.size());
-<<<<<<< HEAD
-            List<TextSegment> batch = allChunks.subList(start, end);
-            List<String> batchIds = allChunkIds.subList(start, end);
-
-            Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
-            if (resp == null || resp.content() == null || resp.content().isEmpty()) {
-                throw new IllegalStateException(
-                        String.format("rag.reindex embedAll returned null/empty for batch=[%d,%d)", start, end));
-            }
-            if (resp.content().size() != batch.size()) {
-                throw new IllegalStateException(
-                        String.format("rag.reindex embedAll size mismatch: expected=%d actual=%d batch=[%d,%d)",
-                                batch.size(), resp.content().size(), start, end));
-            }
-            log.info("rag.reindex embedding done batch=[{},{}) embeddings={}", start, end, resp.content().size());
-
-            try {
-                embeddingStore.addAll(batchIds, resp.content(), batch);
-            } catch (Exception ex) {
-                log.error("rag.reindex store.addAll failed vectorStore={} batchRange=[{},{}) firstId={} err={}",
-                        vectorStore, start, end, batchIds.get(0), ex.getMessage(), ex);
-                throw ex;
-            }
-            embeddings.addAll(resp.content());
-            log.info("rag.reindex embedded {} / {}", end, allChunks.size());
-=======
-
             List<TextSegment> batch = allChunks.subList(start, end);
             List<String> batchIds = allChunkIds.subList(start, end);
 
@@ -284,7 +257,6 @@ public class RagService {
             }
 
             log.info("rag.reindex embedded+stored {} / {}", end, allChunks.size());
->>>>>>> main
         }
 
         log.info("rag.reindex storing complete chunks={} embeddings={}", allChunks.size(), embeddings.size());
