@@ -228,6 +228,11 @@ public class RagService {
             List<String> batchIds = allChunkIds.subList(start, end);
 
             Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
+            Embedding first = (resp.content() == null || resp.content().isEmpty()) ? null : resp.content().get(0);
+            int dim = (first == null || first.vector() == null) ? 0 : first.vector().length;
+            log.info("rag.reindex embedding batch range=[{}, {}) segments={} embeddings={} dim={}",
+                    start, end, batch.size(), resp.content() == null ? -1 : resp.content().size(), dim);
+
             if (resp == null || resp.content() == null || resp.content().isEmpty()) {
                 throw new IllegalStateException("EmbeddingModel.embedAll returned empty embeddings. Check embedding.provider and API key/model config.");
             }
@@ -246,6 +251,7 @@ public class RagService {
                 throw new IllegalStateException("embedAll size mismatch: embeddings=" + resp.content().size()
                         + " segments=" + batch.size() + " start=" + start + " end=" + end);
             }
+            embeddings.addAll(resp.content());
 
             try {
                 // 关键：用带 id 的写入（下面这个方法名/签名以你当前 langchain4j 版本为准）
@@ -259,7 +265,7 @@ public class RagService {
             log.info("rag.reindex embedded+stored {} / {}", end, allChunks.size());
         }
 
-        log.info("rag.reindex storing complete chunks={} embeddings={}", allChunks.size(), embeddings.size());
+        log.info("rag.reindex storing complete chunks={} embeddings处理块={}", allChunks.size(), embeddings.size());
 
         // Post-reindex persistence sanity check: search using first chunk to verify embeddings are retrievable
         try {
