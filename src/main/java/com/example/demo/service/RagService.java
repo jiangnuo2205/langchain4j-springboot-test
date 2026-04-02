@@ -224,6 +224,7 @@ public class RagService {
         List<Embedding> embeddings = new ArrayList<>();
         for (int start = 0; start < allChunks.size(); start += batchSize) {
             int end = Math.min(start + batchSize, allChunks.size());
+<<<<<<< HEAD
             List<TextSegment> batch = allChunks.subList(start, end);
             List<String> batchIds = allChunkIds.subList(start, end);
 
@@ -248,6 +249,42 @@ public class RagService {
             }
             embeddings.addAll(resp.content());
             log.info("rag.reindex embedded {} / {}", end, allChunks.size());
+=======
+
+            List<TextSegment> batch = allChunks.subList(start, end);
+            List<String> batchIds = allChunkIds.subList(start, end);
+
+            Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
+            if (resp == null || resp.content() == null || resp.content().isEmpty()) {
+                throw new IllegalStateException("EmbeddingModel.embedAll returned empty embeddings. Check embedding.provider and API key/model config.");
+            }
+
+            log.info("rag.reindex embedAll done start={} end={} batchSize={} embeddings={}",
+                    start, end, batch.size(), resp == null ? "null" : (resp.content() == null ? "null" : resp.content().size()));
+            log.info("finishreason={},tokenusage={}", resp == null ? "null" : resp.finishReason(), resp == null ? "null" : resp.tokenUsage());
+
+            if (resp == null || resp.content() == null) {
+                throw new IllegalStateException("embedAll returned null content, start=" + start + " end=" + end);
+            }
+            if (resp.content().isEmpty()) {
+                throw new IllegalStateException("embedAll returned empty embeddings, batchSize=" + batch.size());
+            }
+            if (resp.content().size() != batch.size()) {
+                throw new IllegalStateException("embedAll size mismatch: embeddings=" + resp.content().size()
+                        + " segments=" + batch.size() + " start=" + start + " end=" + end);
+            }
+
+            try {
+                // 关键：用带 id 的写入（下面这个方法名/签名以你当前 langchain4j 版本为准）
+                embeddingStore.addAll(batchIds, resp.content(), batch);
+            } catch (Exception e) {
+                log.error("Chroma addAll failed start={} end={} firstId={} err={}",
+                        start, end, batchIds.get(0), e.toString(), e);
+                throw e; // fail-fast：让 /api/rag/reindex 返回 500
+            }
+
+            log.info("rag.reindex embedded+stored {} / {}", end, allChunks.size());
+>>>>>>> main
         }
 
         log.info("rag.reindex storing complete chunks={} embeddings={}", allChunks.size(), embeddings.size());
