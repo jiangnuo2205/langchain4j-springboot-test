@@ -11,6 +11,7 @@ import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -95,6 +96,12 @@ public class RagService {
         this.maxChunksPerFile = maxChunksPerFile;
         this.batchSize = batchSize;
         this.skipHugeFiles = skipHugeFiles;
+    }
+
+    @PostConstruct
+    void logConfig() {
+        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={}",
+                vectorStore, embeddingProvider, llmProvider, docsDir);
     }
 
     /** Stats: index state summary for observability without heap dumps. */
@@ -209,10 +216,8 @@ public class RagService {
             return 0;
         }
 
-        // Embed all chunks
+        // Embed all chunks in batches and store with stable IDs
         log.info("rag.reindex embedding start chunks={}", allChunks.size());
-//        Response<List<Embedding>> embResponse = embeddingModel.embedAll(allChunks);
-
 
         //batchSize从配置文件获取
         int batchSize = this.batchSize;
@@ -220,18 +225,49 @@ public class RagService {
         for (int start = 0; start < allChunks.size(); start += batchSize) {
             int end = Math.min(start + batchSize, allChunks.size());
             List<TextSegment> batch = allChunks.subList(start, end);
-            Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
-            log.info("rag.reindex embedding done chunks={} embeddings={}", allChunks.size(), resp.content().size());
+            List<String> batchIds = allChunkIds.subList(start, end);
 
+            Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
+            if (resp == null || resp.content() == null || resp.content().isEmpty()) {
+                throw new IllegalStateException(
+                        String.format("rag.reindex embedAll returned null/empty for batch=[%d,%d)", start, end));
+            }
+            if (resp.content().size() != batch.size()) {
+                throw new IllegalStateException(
+                        String.format("rag.reindex embedAll size mismatch: expected=%d actual=%d batch=[%d,%d)",
+                                batch.size(), resp.content().size(), start, end));
+            }
+            log.info("rag.reindex embedding done batch=[{},{}) embeddings={}", start, end, resp.content().size());
+
+            try {
+                embeddingStore.addAll(batchIds, resp.content(), batch);
+            } catch (Exception ex) {
+                log.error("rag.reindex store.addAll failed vectorStore={} batchRange=[{},{}) firstId={} err={}",
+                        vectorStore, start, end, batchIds.get(0), ex.getMessage(), ex);
+                throw ex;
+            }
             embeddings.addAll(resp.content());
-            embeddingStore.addAll(resp.content(), batch); // 或 chromaStore.addAll
             log.info("rag.reindex embedded {} / {}", end, allChunks.size());
         }
 
-//        log.info("rag.reindex embedding done chunks={} embeddings={}", allChunks.size(), embResponse.content().size());
-        log.info("rag.reindex storing embeddings chunks={} embeddings={}", allChunks.size(), embeddings.size());
-//        List<Embedding> embeddings = embResponse.content();
-//        embeddingStore.addAll(embeddings, allChunks);
+        log.info("rag.reindex storing complete chunks={} embeddings={}", allChunks.size(), embeddings.size());
+
+        // Post-reindex persistence sanity check: search using first chunk to verify embeddings are retrievable
+        try {
+            Embedding sampleEmbedding = embeddingModel.embed(allChunks.get(0)).content();
+            EmbeddingSearchRequest sampleReq = EmbeddingSearchRequest.builder()
+                    .queryEmbedding(sampleEmbedding)
+                    .maxResults(1)
+                    .minScore(0.0)
+                    .build();
+            int matchCount = embeddingStore.search(sampleReq).matches().size();
+            log.info("rag.reindex sanityCheck matchCount={} vectorStore={}", matchCount, vectorStore);
+            if (matchCount == 0) {
+                log.warn("rag.reindex sanityCheck returned 0 matches – embeddings may not be persisted vectorStore={}", vectorStore);
+            }
+        } catch (Exception ex) {
+            log.warn("rag.reindex sanityCheck failed err={}", ex.getMessage());
+        }
 
         // Build metadata snapshot for stats
         List<IndexedChunkMeta> metas = new ArrayList<>(allChunks.size());
