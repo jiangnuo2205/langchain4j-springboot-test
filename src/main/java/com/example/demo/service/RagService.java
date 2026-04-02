@@ -31,6 +31,8 @@ public class RagService {
 
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** Fallback key used in per-doc counts when a chunk has no docId metadata. */
+    private static final String UNKNOWN_DOC_KEY = "<unknown>";
 
     private final EmbeddingModel embeddingModel;
     private final ChatModel chatModel;
@@ -47,7 +49,10 @@ public class RagService {
     private final int maxChunksPerFile;
     private final int batchSize;
     private final boolean skipHugeFiles;
+    private final int maxChunksPerDoc;
 
+    // Captured during the first successful reindex; used in stats for observability.
+    private volatile int lastEmbeddingDim = 0;
 
     // Metadata snapshot for /api/rag/stats (no heap dump needed)
     public record IndexedChunkMeta(
@@ -78,7 +83,8 @@ public class RagService {
             @Value("${vector.store:inmemory}") String vectorStore,
             @Value("${rag.index.maxChunksPerFile}") int maxChunksPerFile,
             @Value("${rag.index.batchSize}") int batchSize,
-            @Value("${rag.index.skipHugeFiles.enabled}") boolean skipHugeFiles
+            @Value("${rag.index.skipHugeFiles.enabled}") boolean skipHugeFiles,
+            @Value("${rag.retrieve.maxChunksPerDoc:2}") int maxChunksPerDoc
 
     ) {
         this.embeddingModel = embeddingModel;
@@ -96,6 +102,7 @@ public class RagService {
         this.maxChunksPerFile = maxChunksPerFile;
         this.batchSize = batchSize;
         this.skipHugeFiles = skipHugeFiles;
+        this.maxChunksPerDoc = maxChunksPerDoc;
     }
 
     @PostConstruct
@@ -135,6 +142,8 @@ public class RagService {
         result.put("maxChunksPerFile", maxChunksPerFile);
         result.put("batchSize", batchSize);
         result.put("skipHugeFiles", skipHugeFiles);
+        result.put("maxChunksPerDoc", maxChunksPerDoc);
+        result.put("lastEmbeddingDim", lastEmbeddingDim);
         return result;
     }
 
@@ -230,6 +239,9 @@ public class RagService {
             Response<List<Embedding>> resp = embeddingModel.embedAll(batch);
             Embedding first = (resp.content() == null || resp.content().isEmpty()) ? null : resp.content().get(0);
             int dim = (first == null || first.vector() == null) ? 0 : first.vector().length;
+            if (start == 0 && dim > 0) {
+                this.lastEmbeddingDim = dim;
+            }
             log.info("rag.reindex embedding batch range=[{}, {}) segments={} embeddings={} dim={}",
                     start, end, batch.size(), resp.content() == null ? -1 : resp.content().size(), dim);
 
@@ -326,6 +338,9 @@ public class RagService {
 
     /**
      * Retrieve chunks with scores and metadata, optionally overriding maxResults.
+     * When {@code rag.retrieve.maxChunksPerDoc > 0}, post-processing diversification
+     * is applied: no more than {@code maxChunksPerDoc} chunks from the same docId are
+     * included in the final results, preventing a single document from dominating topK.
      *
      * @param question   the query
      * @param maxResults override for topK (null = use configured topK)
@@ -333,13 +348,52 @@ public class RagService {
     public List<Map<String, Object>> retrieveWithScores(String question, Integer maxResults) {
         Embedding queryEmbedding = embeddingModel.embed(TextSegment.from(question)).content();
 
+        int limit = maxResults != null ? maxResults : topK;
+
+        // When diversification is enabled, fetch extra candidates so filtering still
+        // yields `limit` results even if some docs are over-represented in the raw ranking.
+        // The multiplier (maxChunksPerDoc) ensures we have enough raw candidates; the
+        // minimum fetch of 100 avoids very small fetch windows for tiny topK values.
+        int fetchSize = (maxChunksPerDoc > 0)
+                ? Math.min(limit * maxChunksPerDoc, Math.max(limit * 10, 100))
+                : limit;
+
         EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
                 .queryEmbedding(queryEmbedding)
-                .maxResults(maxResults != null ? maxResults : topK)
+                .maxResults(fetchSize)
                 .minScore(minScore)
                 .build();
 
-        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
+        List<EmbeddingMatch<TextSegment>> allMatches = embeddingStore.search(request).matches();
+        List<EmbeddingMatch<TextSegment>> matches;
+
+        if (maxChunksPerDoc > 0 && !allMatches.isEmpty()) {
+            Map<String, Integer> docCounts = new LinkedHashMap<>();
+            List<EmbeddingMatch<TextSegment>> filtered = new ArrayList<>();
+            int skipped = 0;
+
+            for (EmbeddingMatch<TextSegment> m : allMatches) {
+                String docId = (m.embedded() != null && m.embedded().metadata() != null)
+                        ? m.embedded().metadata().getString("docId")
+                        : null;
+                String key = docId != null ? docId : UNKNOWN_DOC_KEY;
+                int count = docCounts.getOrDefault(key, 0);
+                if (count < maxChunksPerDoc) {
+                    docCounts.put(key, count + 1);
+                    filtered.add(m);
+                    if (filtered.size() >= limit) break;
+                } else {
+                    skipped++;
+                }
+            }
+
+            log.debug("rag.retrieve diversify uniqueDocIds={} skipped={} selected={} maxChunksPerDoc={}",
+                    docCounts.size(), skipped, filtered.size(), maxChunksPerDoc);
+            matches = filtered;
+        } else {
+            matches = allMatches;
+        }
+
         List<Map<String, Object>> results = new ArrayList<>();
 
         for (int i = 0; i < matches.size(); i++) {
