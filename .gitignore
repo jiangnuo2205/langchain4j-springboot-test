@@ -8,3 +8,11 @@ target/
 
 # local secrets (do not commit)
 src/main/resources/application-local.properties
+
+# 原始文件禁止上传
+raw/
+normalized/
+
+# 测试集禁止上传
+eval/*.jsonl
+eval/mes/*.jsonl
