@@ -5,6 +5,7 @@ target/
 .vscode/
 .gradle/
 *.log
+*.jsonl
 
 # local secrets (do not commit)
 src/main/resources/application-local.properties
