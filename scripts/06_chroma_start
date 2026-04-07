@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 启动 chroma
+chroma run \
+  --host 0.0.0.0 \
+  --port 8020 \
+  --path /Volumes/G/rag-file/260401-spb-lang4j-rag-performance/chroma-data \
+  2>&1 | tee /tmp/chroma.log

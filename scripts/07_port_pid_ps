@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# port 8020 is used by chroma, find pid and kill
+# port 8090 is used by rag server, find pid and kill
+lsof -nP -iTCP:8020 -sTCP:LISTEN
+# kill pid
