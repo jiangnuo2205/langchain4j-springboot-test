@@ -17,3 +17,4 @@ normalized/
 # 测试集禁止上传
 eval/*.jsonl
 eval/mes/*.jsonl
+eval/*.csv
