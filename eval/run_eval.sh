@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CASES_FILE="${1:-eval/cases.v3.docIdFilename.jsonl}"
+CASES_FILE="${1:-eval/eval_cases.v3.docIdFilename_Version2.jsonl}"
 BASE_URL="${BASE_URL:-http://localhost:8090}"
 K_DEFAULT="${K_DEFAULT:-10}"
 

@@ -6,6 +6,7 @@ import dev.langchain4j.community.model.dashscope.QwenChatModel;
 import dev.langchain4j.community.model.dashscope.QwenEmbeddingModel;
 import dev.langchain4j.community.model.dashscope.QwenStreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.onnx.bgesmallzh.BgeSmallZhEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
@@ -108,4 +109,13 @@ public class LangChain4jConfig {
             .timeout(Duration.ofSeconds(timeoutSeconds))
             .build();
   }
+
+  // 在你的 EmbeddingModelConfig 或类似的配置类里
+  @Bean
+  @ConditionalOnProperty(name = "embedding.provider", havingValue = "bge-inprocess")
+  public EmbeddingModel bgeInProcessEmbedding() {
+    return new BgeSmallZhEmbeddingModel();
+  }
+
+
 }
