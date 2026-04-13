@@ -5,7 +5,6 @@ target/
 .vscode/
 .gradle/
 *.log
-*.jsonl
 
 # local secrets (do not commit)
 src/main/resources/application-local.properties
@@ -18,3 +17,6 @@ normalized/
 eval/*.jsonl
 eval/mes/*.jsonl
 eval/*.csv
+
+# 评估结果禁止上传
+*.jsonl
