@@ -30,6 +30,11 @@ while IFS= read -r line; do
     --data-urlencode "q=$q" \
     --data-urlencode "k=$k")
 
+  if ! echo "$res" | jq -e . >/dev/null 2>&1; then
+    echo "[ERROR] $id non-json response: $(echo "$res" | head -c 120)"
+    continue
+  fi
+
   got=$(echo "$res" | jq -r '.results|length')
   top1=$(echo "$res" | jq -r '.results[0].metadata.docId // ""')
   docIds=$(echo "$res" | jq -r '.results[].metadata.docId // empty')
