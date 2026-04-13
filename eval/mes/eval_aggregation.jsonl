@@ -1,0 +1,15 @@
+{"id":"agg-001","q":"知识库中效率异常类告警一共有多少条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md","expectedAnswer":"15条（EFF-2025-0001至0015）"}}
+{"id":"agg-002","q":"质量异常类告警共有多少条，覆盖哪些车间？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md","expectedAnswer":"20条（QLT-2025-0016至0035），覆盖冲压、SMT、注塑、锂电、CNC、涂装、焊接、半导体等"}}
+{"id":"agg-003","q":"成本异常类告警里，使用LSTM技术检测的有哪几条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md","expectedAnswer":"HVAC-03、废料统计、铸造IF-C03、AGV调度、模具预测性维护等"}}
+{"id":"agg-004","q":"人效异常告警里P2严重级别的共有几条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md","expectedAnswer":"QC-L2漏检、包装TEAM-D04、夜班巡检、TEAM-F05等"}}
+{"id":"agg-005","q":"使用IsolationForest算法检测的告警一共有多少条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-006","q":"2025年1月份触发的告警共有几条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-007","q":"P1严重级别的告警共有多少条？都涉及哪些异常类型？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-008","q":"注塑车间一共触发了多少次告警？分别是哪些类型？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-009","q":"使用3σ准则的告警和使用IQR的告警各有多少条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-010","q":"Flink滑动窗口步长为1分钟的告警一共有几条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-011","q":"锂电池相关的所有告警都涉及哪些设备？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-012","q":"夜班时段（22点到6点）触发的告警共有多少条？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-013","q":"复合异常（同时涉及两种及以上异常类型）的告警有哪些？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-014","q":"SMT贴片线一共触发过哪几条告警？涉及效率还是质量问题？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"agg-015","q":"规则引擎作为检测技术的告警里，最多涉及哪种异常类型？","type":"aggregation","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}

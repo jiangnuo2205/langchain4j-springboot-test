@@ -1,0 +1,27 @@
+{"id":"case-001","q":"申诉要几个工作日出结果？","type":"fact","shouldRefuse":false,"gold":{"docId":"员工申诉管理制度.txt"}}
+{"id":"case-002","q":"虎林市大豆生产基地建设项目建设任务有效性如何评估？","type":"fact","shouldRefuse":false,"gold":{"docId":"虎林市2023年度大豆生产基地建设项目绩效自评报告.txt"}}
+{"id":"case-003","q":"数字挛生技术节约了什么？","type":"fact","shouldRefuse":false,"gold":{"docId":"企业数字化转型对绩效的影响研究 .txt"}}
+{"id":"case-004","q":"加班餐费多少？","type":"fact","shouldRefuse":false,"gold":{"docId":"京东员工手册.txt"}}
+{"id":"case-005","q":"董事、高级管理人员的薪酬分配与考核标准是啥？","type":"fact","shouldRefuse":false,"gold":{"docId":"董事和高级管理人员薪酬与绩效考核制度.txt"}}
+{"id":"case-006","q":"股票收益率怎么计算？","type":"fact","shouldRefuse":false,"gold":{"docId":"工业行业财务绩效分化研究230530.txt"}}
+{"id":"case-007","q":"员工关怀及活动怎么做？","type":"fact","shouldRefuse":false,"gold":{"docId":"员工关系管理制度.txt"}}
+{"id":"case-008","q":"招聘原则","type":"fact","shouldRefuse":false,"gold":{"docId":"招聘管理制度.txt"}}
+{"id":"case-009","q":"灯塔网络是什么？","type":"fact","shouldRefuse":false,"gold":{"docId":"WEF_Global_Lighthouse_Network_2025_CN.txt"}}
+{"id":"case-010","q":"培训金额在 3000元/人次以上向谁申请？","type":"fact","shouldRefuse":false,"gold":{"docId":"员工手册.txt"}}
+{"id":"case-011","q":"有人离职如何处理？","type":"reason","shouldRefuse":false,"gold":{"docId":"京东员工手册.txt"}}
+{"id":"case-012","q":"假期怎么处理？","type":"reason","shouldRefuse":false,"gold":{"docId":"员工行为规范管理制度.txt"}}
+{"id":"case-013","q":"招聘原则有哪些","type":"reason","shouldRefuse":false,"gold":{"docId":"招聘管理制度.txt"}}
+{"id":"case-014","q":"离职员工薪酬怎么计算","type":"reason","shouldRefuse":false,"gold":{"docId":"薪酬管理制度2.txt"}}
+{"id":"case-015","q":"离职面谈应包含哪些内容","type":"reason","shouldRefuse":false,"gold":{"docId":"员工关系管理制度.txt"}}
+{"id":"case-016","q":"老板几岁了？","type":"refuse","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"case-017","q":"2024年4月进料批次检验合格率目标值是多少？","type":true,"shouldRefuse":true,"gold":{"docId":""}}
+{"id":"case-018","q":"中国在哪个洲","type":"refuse","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"case-019","q":"公司有几个人","type":"refuse","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"case-020","q":"老板有亲属在公司吗","type":"refuse","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"case-021","q":"薪酬有哪些？","type":"huhu","shouldRefuse":false,"gold":{"docId":"绩效薪酬管理体系.txt"}}
+{"id":"case-022","q":"员工手册要求什么？","type":"huhu","shouldRefuse":false,"gold":{"docId":"员工手册.txt"}}
+{"id":"case-023","q":"招聘流程？","type":"huhu","shouldRefuse":false,"gold":{"docId":"招聘管理制度.txt"}}
+{"id":"case-024","q":"请假扣钱吗？","type":"huhu","shouldRefuse":false,"gold":{"docId":"京东员工手册.txt"}}
+{"id":"case-025","q":"哺乳假怎么规定？","type":"huhu","shouldRefuse":false,"gold":{"docId":"京东员工手册.txt"}}
+
+

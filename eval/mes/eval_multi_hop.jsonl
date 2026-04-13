@@ -1,0 +1,10 @@
+{"id":"mh-001","q":"根因涉及'磨损'的告警有多少条？分别在哪些设备上？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-002","q":"使用LSTM算法的告警中，恢复时间超过2小时的有哪几条？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-003","q":"同时涉及效率异常和质量异常的复合告警，最常见的根因类别是什么？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-004","q":"夜班时段发生的告警里，人效异常和效率异常的比例大概是多少？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-005","q":"锂电池生产相关的所有告警横跨了哪几类异常？最严重的是哪一条？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-006","q":"由'传感器故障'或'校准漂移'导致的告警有哪几条？分别属于什么异常类型？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-007","q":"使用3σ准则的告警平均恢复时间相比使用IsolationForest的告警更长还是更短？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-008","q":"涉及'密封'问题的告警共有几条？它们是成本异常还是质量异常居多？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-009","q":"同一天内触发多条告警的日期都有哪些？最多的一天是哪天？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}
+{"id":"mh-010","q":"如果要针对'新员工熟练度不足'这个根因做专项培训，应该覆盖哪些工位？","type":"multi_hop","shouldRefuse":false,"gold":{"docId":"mes_alerts.md"}}

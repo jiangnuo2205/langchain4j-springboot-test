@@ -1,0 +1,15 @@
+{"id":"ref-001","q":"2026年3月注塑机INJ-B07触发了哪些告警？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-002","q":"2024年12月的OEE异常告警有哪些？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-003","q":"冲压车间PRESS-A99压力机的历史告警记录是什么？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-004","q":"员工EMP-9999的人效异常告警有几条？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-005","q":"使用Transformer算法检测的告警有多少条？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-006","q":"知识库里有没有涉及核电站反应堆的告警？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-007","q":"PRESS-A03压力机维修完后当月又触发了几次同样的告警？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-008","q":"请列出2025年10月以后的所有告警。","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-009","q":"锂电池卷绕机WND-E99在2025年6月的张力异常是什么原因？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-010","q":"Flink窗口步长为2小时的告警配置是怎么做的？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-011","q":"知识库里告警的平均响应时间SLA承诺是多少分钟？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-012","q":"质检员EMP-0891的月度绩效考核分数是多少？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-013","q":"告警ID为ALRM-EFF-99999999-999的详细信息是什么？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-014","q":"XGBoost模型在哪些告警中被用作检测技术？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
+{"id":"ref-015","q":"P5级别的轻微告警一共有几条？","type":"refusal","shouldRefuse":true,"gold":{"docId":""}}
