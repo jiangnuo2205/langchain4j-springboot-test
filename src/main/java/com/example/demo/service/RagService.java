@@ -14,6 +14,7 @@ import dev.langchain4j.store.embedding.EmbeddingStore;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -33,12 +34,18 @@ public class RagService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     /** Fallback key used in per-doc counts when a chunk has no docId metadata. */
     private static final String UNKNOWN_DOC_KEY = "<unknown>";
+    /** ATX-style Markdown heading pattern (# Heading, ## Heading, …). */
+    private static final java.util.regex.Pattern HEADING_PATTERN =
+            java.util.regex.Pattern.compile("^#{1,6}\\s+.*");
+    /** Separator used between overlap tail and the following chunk body. */
+    private static final String OVERLAP_SEPARATOR = "\n\n";
 
     private final EmbeddingModel embeddingModel;
     private final ChatModel chatModel;
     private final EmbeddingStore<TextSegment> embeddingStore;
     private final String docsDir;
     private final int chunkMaxChars;
+    private final int chunkOverlapChars;
     private final int topK;
     private final double minScore;
     private final boolean rerankEnabled;
@@ -50,6 +57,18 @@ public class RagService {
     private final int batchSize;
     private final boolean skipHugeFiles;
     private final int maxChunksPerDoc;
+
+    // Hybrid retrieval (BM25 + vector)
+    private final boolean hybridEnabled;
+    private final int hybridRrfK;
+    private final int hybridCandidateK;
+
+    // Confidence gate for answer refusal
+    private final double answerMinScore;
+
+    /** Optional BM25 service; null when rag.bm25.enabled=false. */
+    @Autowired(required = false)
+    private Bm25IndexService bm25IndexService;
 
     // Captured during the first successful reindex; used in stats for observability.
     private volatile int lastEmbeddingDim = 0;
@@ -74,6 +93,7 @@ public class RagService {
             EmbeddingStore<TextSegment> embeddingStore,
             @Value("${rag.docs.dir:}") String docsDir,
             @Value("${rag.chunk.maxChars:500}") int chunkMaxChars,
+            @Value("${rag.chunk.overlapChars:80}") int chunkOverlapChars,
             @Value("${rag.topK:3}") int topK,
             @Value("${rag.minScore:0.0}") double minScore,
             @Value("${rag.rerank.enabled:false}") boolean rerankEnabled,
@@ -84,7 +104,11 @@ public class RagService {
             @Value("${rag.index.maxChunksPerFile}") int maxChunksPerFile,
             @Value("${rag.index.batchSize}") int batchSize,
             @Value("${rag.index.skipHugeFiles.enabled}") boolean skipHugeFiles,
-            @Value("${rag.retrieve.maxChunksPerDoc:2}") int maxChunksPerDoc
+            @Value("${rag.retrieve.maxChunksPerDoc:2}") int maxChunksPerDoc,
+            @Value("${rag.hybrid.enabled:false}") boolean hybridEnabled,
+            @Value("${rag.hybrid.rrf.k:60}") int hybridRrfK,
+            @Value("${rag.hybrid.candidateK:50}") int hybridCandidateK,
+            @Value("${rag.answer.minScore:0.35}") double answerMinScore
 
     ) {
         this.embeddingModel = embeddingModel;
@@ -92,6 +116,7 @@ public class RagService {
         this.embeddingStore = embeddingStore;
         this.docsDir = docsDir;
         this.chunkMaxChars = chunkMaxChars;
+        this.chunkOverlapChars = chunkOverlapChars;
         this.topK = topK;
         this.minScore = minScore;
         this.rerankEnabled = rerankEnabled;
@@ -103,12 +128,16 @@ public class RagService {
         this.batchSize = batchSize;
         this.skipHugeFiles = skipHugeFiles;
         this.maxChunksPerDoc = maxChunksPerDoc;
+        this.hybridEnabled = hybridEnabled;
+        this.hybridRrfK = hybridRrfK;
+        this.hybridCandidateK = Math.min(hybridCandidateK, 50);
+        this.answerMinScore = answerMinScore;
     }
 
     @PostConstruct
     void logConfig() {
-        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={}",
-                vectorStore, embeddingProvider, llmProvider, docsDir);
+        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={} hybridEnabled={} answerMinScore={}",
+                vectorStore, embeddingProvider, llmProvider, docsDir, hybridEnabled, answerMinScore);
     }
 
     /** Stats: index state summary for observability without heap dumps. */
@@ -144,6 +173,10 @@ public class RagService {
         result.put("skipHugeFiles", skipHugeFiles);
         result.put("maxChunksPerDoc", maxChunksPerDoc);
         result.put("lastEmbeddingDim", lastEmbeddingDim);
+        result.put("hybridEnabled", hybridEnabled);
+        result.put("bm25Available", bm25IndexService != null);
+        result.put("chunkOverlapChars", chunkOverlapChars);
+        result.put("answerMinScore", answerMinScore);
         return result;
     }
 
@@ -197,7 +230,7 @@ public class RagService {
                                         "docId", fileName,
                                         "sourcePath", file.toString(),
                                         "chunkIndex", String.valueOf(i),
-                                        "chunkStrategy", "paragraph"
+                                        "chunkStrategy", chunkOverlapChars > 0 ? "structural-overlap" : "structural"
                                 ));
                                 log.debug("rag.reindex chunk meta file={} chunkIndex={} meta={}", fileName, i, meta);
                                 if (chunk == null || chunk.isBlank()) {
@@ -279,6 +312,18 @@ public class RagService {
 
         log.info("rag.reindex storing complete chunks={} embeddings处理块={}", allChunks.size(), embeddings.size());
 
+        // BM25 indexing (when enabled)
+        if (bm25IndexService != null) {
+            log.info("rag.reindex bm25 indexing start chunks={}", allChunks.size());
+            try {
+                bm25IndexService.clearAndCreateIndex();
+                bm25IndexService.bulkIndex(allChunks, allChunkIds);
+                log.info("rag.reindex bm25 indexing done chunks={}", allChunks.size());
+            } catch (Exception e) {
+                log.error("rag.reindex bm25 indexing failed err={} – vector index is still complete", e.getMessage());
+            }
+        }
+
         // Post-reindex persistence sanity check: search using first chunk to verify embeddings are retrievable
         try {
             Embedding sampleEmbedding = embeddingModel.embed(allChunks.get(0)).content();
@@ -341,11 +386,23 @@ public class RagService {
      * When {@code rag.retrieve.maxChunksPerDoc > 0}, post-processing diversification
      * is applied: no more than {@code maxChunksPerDoc} chunks from the same docId are
      * included in the final results, preventing a single document from dominating topK.
+     * <p>
+     * When {@code rag.hybrid.enabled=true} and BM25 is available, delegates to
+     * {@link #retrieveWithScoresHybrid} for Reciprocal Rank Fusion.
      *
      * @param question   the query
      * @param maxResults override for topK (null = use configured topK)
      */
     public List<Map<String, Object>> retrieveWithScores(String question, Integer maxResults) {
+        if (hybridEnabled && bm25IndexService != null) {
+            return retrieveWithScoresHybrid(question, maxResults);
+        }
+        return retrieveVectorOnly(question, maxResults);
+    }
+
+    // ── Vector-only retrieval (original logic) ─────────────────────────────────
+
+    private List<Map<String, Object>> retrieveVectorOnly(String question, Integer maxResults) {
         Embedding queryEmbedding = embeddingModel.embed(TextSegment.from(question)).content();
 
         int limit = maxResults != null ? maxResults : topK;
@@ -433,14 +490,154 @@ public class RagService {
         return results;
     }
 
+    // ── Hybrid retrieval with RRF fusion ───────────────────────────────────────
+
+    /**
+     * Hybrid retrieval: combines vector (Chroma) and BM25 (Elasticsearch) candidates
+     * using Reciprocal Rank Fusion (RRF).
+     *
+     * <p>RRF score formula per document: {@code sum_over_rankers( 1 / (k + rank) )}
+     * where {@code k = rag.hybrid.rrf.k} (default 60) dampens the influence of
+     * highly-ranked documents.
+     *
+     * @param question   the query text
+     * @param maxResults override for topK (null = use configured topK)
+     */
+    private List<Map<String, Object>> retrieveWithScoresHybrid(String question, Integer maxResults) {
+        int limit = maxResults != null ? maxResults : topK;
+        int candidateK = hybridCandidateK;
+        int k = hybridRrfK;
+
+        // ── 1. Vector candidates ───────────────────────────────────────────────
+        List<Map<String, Object>> vectorResults = retrieveVectorOnly(question, candidateK);
+
+        // ── 2. BM25 candidates (with graceful fallback) ────────────────────────
+        List<Bm25IndexService.BM25Hit> bm25Results;
+        try {
+            bm25Results = bm25IndexService.search(question, candidateK);
+        } catch (Exception e) {
+            log.warn("rag.hybrid bm25 search failed, falling back to vector-only err={}", e.getMessage());
+            return vectorResults.subList(0, Math.min(limit, vectorResults.size()));
+        }
+
+        // ── 3. RRF fusion ──────────────────────────────────────────────────────
+        // Map: sourceId -> accumulated RRF score
+        Map<String, Double> rrfScores = new LinkedHashMap<>();
+        // Map: sourceId -> result data (from whichever retriever saw it first)
+        Map<String, Map<String, Object>> docData = new LinkedHashMap<>();
+
+        // Score from vector ranking
+        for (int i = 0; i < vectorResults.size(); i++) {
+            Map<String, Object> r = vectorResults.get(i);
+            String sourceId = (String) r.get("sourceId");
+            if (sourceId == null) continue;
+            double rrf = 1.0 / (k + i + 1);
+            rrfScores.merge(sourceId, rrf, Double::sum);
+            docData.putIfAbsent(sourceId, r);
+        }
+
+        // Score from BM25 ranking
+        for (int i = 0; i < bm25Results.size(); i++) {
+            Bm25IndexService.BM25Hit hit = bm25Results.get(i);
+            String chunkId = hit.chunkId();
+            double rrf = 1.0 / (k + i + 1);
+            rrfScores.merge(chunkId, rrf, Double::sum);
+            if (!docData.containsKey(chunkId)) {
+                // Build a result map from the BM25 hit (chunk was not in vector results)
+                docData.put(chunkId, buildResultFromBm25Hit(hit));
+            }
+        }
+
+        // ── 4. Sort by fused RRF score ─────────────────────────────────────────
+        List<String> sortedIds = rrfScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .toList();
+
+        // ── 5. Build merged list (replace individual scores with RRF score) ────
+        List<Map<String, Object>> merged = new ArrayList<>(sortedIds.size());
+        for (String id : sortedIds) {
+            Map<String, Object> r = new LinkedHashMap<>(docData.get(id));
+            r.put("score", rrfScores.get(id));
+            merged.add(r);
+        }
+
+        log.debug("rag.hybrid vectorCandidates={} bm25Candidates={} merged={} limit={}",
+                vectorResults.size(), bm25Results.size(), merged.size(), limit);
+
+        // ── 6. Apply maxChunksPerDoc diversification ───────────────────────────
+        if (maxChunksPerDoc > 0 && !merged.isEmpty()) {
+            Map<String, Integer> docCounts = new LinkedHashMap<>();
+            List<Map<String, Object>> filtered = new ArrayList<>();
+            for (Map<String, Object> r : merged) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> meta = (Map<String, Object>) r.get("metadata");
+                String docId = meta != null ? (String) meta.get("docId") : null;
+                String key = docId != null ? docId : UNKNOWN_DOC_KEY;
+                int count = docCounts.getOrDefault(key, 0);
+                if (count < maxChunksPerDoc) {
+                    docCounts.put(key, count + 1);
+                    filtered.add(r);
+                    if (filtered.size() >= limit) break;
+                }
+            }
+            return filtered;
+        }
+
+        return merged.subList(0, Math.min(limit, merged.size()));
+    }
+
+    /** Build a result map from a BM25 hit, matching the structure from vector retrieval. */
+    private Map<String, Object> buildResultFromBm25Hit(Bm25IndexService.BM25Hit hit) {
+        String text = hit.text();
+        String preview = (text != null && text.length() > 200) ? text.substring(0, 200) + "…" : text;
+        String sourceId = (hit.docId() != null)
+                ? hit.docId() + "#chunk=" + hit.chunkIndex()
+                : hit.chunkId();
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("sourceId", sourceId);
+        entry.put("score", hit.score());
+        entry.put("textPreview", preview);
+        entry.put("text", text);
+        Map<String, Object> metaMap = new LinkedHashMap<>();
+        if (hit.docId() != null) metaMap.put("docId", hit.docId());
+        if (hit.sourcePath() != null) metaMap.put("sourcePath", hit.sourcePath());
+        metaMap.put("chunkIndex", String.valueOf(hit.chunkIndex()));
+        metaMap.put("chunkStrategy", "bm25");
+        entry.put("metadata", metaMap);
+        return entry;
+    }
+
     /**
      * Retrieve relevant chunks and answer the question using the chat model.
+     * <p>
+     * Applies a confidence gate: if retrieval returns no results or the top chunk
+     * score is below {@code rag.answer.minScore}, a refusal message is returned
+     * instead of calling the LLM with low-quality context.
+     * <p>
      * Optionally applies LLM-based reranking when rag.rerank.enabled=true.
      */
     public String ask(String question) {
         List<Map<String, Object>> results = retrieveWithScores(question);
+
         if (results.isEmpty()) {
-            return chatModel.chat(question);
+            log.info("rag.ask confidence gate: no retrieval results question='{}'", question);
+            return "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。\n\n"
+                    + "Sorry, no relevant content was found in the knowledge base for your question. "
+                    + "Please try rephrasing or check whether the topic is covered.";
+        }
+
+        double topScore = (double) results.get(0).get("score");
+        if (answerMinScore > 0.0 && topScore < answerMinScore) {
+            log.info("rag.ask confidence gate triggered topScore={} answerMinScore={} question='{}'",
+                    topScore, answerMinScore, question);
+            return String.format(
+                    "抱歉，我没有找到足够可信的相关内容来回答您的问题（最高相关度 %.3f，阈值 %.3f）。"
+                            + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
+                            + "Sorry, the retrieved content confidence (%.3f) is below the required threshold (%.3f). "
+                            + "Please rephrase your question or check if the topic is in scope.",
+                    topScore, answerMinScore, topScore, answerMinScore);
         }
 
         List<Map<String, Object>> contextResults = rerankEnabled
@@ -513,62 +710,154 @@ public class RagService {
     }
 
     /**
-     * Split text into chunks of at most maxChars characters, trying to split on paragraph/sentence
-     * boundaries where possible.
+     * Split text into chunks with structural awareness and optional overlap.
+     * <p>
+     * Strategy (in priority order):
+     * <ol>
+     *   <li>Split on Markdown headings ({@code #}, {@code ##}, etc.) to preserve structure.</li>
+     *   <li>Within each section, split on blank lines (paragraph boundaries).</li>
+     *   <li>For paragraphs exceeding {@code chunkMaxChars}, split on sentence boundaries
+     *       (Chinese: {@code 。！？}; English: {@code .!?}) via {@link #splitLongText}.</li>
+     *   <li>Apply {@code chunkOverlapChars} tail overlap between consecutive chunks.</li>
+     * </ol>
      */
     private List<String> chunkText(String text) {
         if (text == null || text.isBlank()) {
             return Collections.emptyList();
         }
 
-        List<String> chunks = new ArrayList<>();
-        String[] paragraphs = text.split("\\n\\n+");
-        StringBuilder current = new StringBuilder();
+        // Step 1: Split on heading boundaries to keep sections together
+        List<String> sections = splitOnHeadings(text);
 
-        for (String para : paragraphs) {
-            String trimmed = para.strip();
-            if (trimmed.isEmpty()) continue;
+        List<String> rawChunks = new ArrayList<>();
 
-            if (current.length() > 0 && current.length() + trimmed.length() + 2 > chunkMaxChars) {
-                chunks.add(current.toString().strip());
-                current = new StringBuilder();
-            }
+        for (String section : sections) {
+            // Step 2 (per section): split on blank lines to get paragraph candidates
+            String[] paragraphs = section.split("\\n\\n+");
+            StringBuilder current = new StringBuilder();
 
-            if (trimmed.length() > chunkMaxChars) {
-                if (current.length() > 0) {
-                    if (current == null ) {
-                        log.warn("Skipping empty chunk while processing text: '{}'", current);
-                        continue;
-                    }
-                    chunks.add(current.toString().strip());
+            for (String para : paragraphs) {
+                String trimmed = para.strip();
+                if (trimmed.isEmpty()) continue;
+
+                if (current.length() > 0 && current.length() + trimmed.length() + 2 > chunkMaxChars) {
+                    rawChunks.add(current.toString().strip());
                     current = new StringBuilder();
                 }
-                splitLongText(trimmed, chunkMaxChars, chunks);
-            } else {
-                if (current.length() > 0) current.append("\n\n");
-                current.append(trimmed);
+
+                // Step 3: Long paragraphs get sentence-split
+                if (trimmed.length() > chunkMaxChars) {
+                    if (current.length() > 0) {
+                        rawChunks.add(current.toString().strip());
+                        current = new StringBuilder();
+                    }
+                    splitLongText(trimmed, chunkMaxChars, rawChunks);
+                } else {
+                    if (current.length() > 0) current.append("\n\n");
+                    current.append(trimmed);
+                }
+            }
+
+            if (current.length() > 0) {
+                rawChunks.add(current.toString().strip());
             }
         }
 
-        if (current.length() > 0) {
-            chunks.add(current.toString().strip());
-        }
+        // Remove any blank chunks produced by edge cases
+        rawChunks.removeIf(String::isBlank);
 
-        return chunks;
+        // Step 4: Apply overlap between consecutive chunks
+        return applyOverlap(rawChunks, chunkOverlapChars);
     }
 
+    /**
+     * Split text on Markdown heading lines (lines starting with {@code #}).
+     * The heading line is kept as the first line of each section.
+     */
+    private List<String> splitOnHeadings(String text) {
+        String[] lines = text.split("\\n", -1);
+        List<String> sections = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+
+        for (String line : lines) {
+            // Detect ATX-style headings using pre-compiled pattern
+            if (HEADING_PATTERN.matcher(line).matches() && current.length() > 0) {
+                sections.add(current.toString());
+                current = new StringBuilder();
+            }
+            current.append(line).append("\n");
+        }
+        if (current.length() > 0) {
+            sections.add(current.toString());
+        }
+        return sections.isEmpty() ? List.of(text) : sections;
+    }
+
+    /**
+     * Prepend the tail of the previous chunk (up to {@code overlapChars} characters)
+     * to each chunk after the first, giving retrieval models cross-boundary context.
+     */
+    private List<String> applyOverlap(List<String> chunks, int overlapChars) {
+        if (overlapChars <= 0 || chunks.size() <= 1) return chunks;
+        List<String> result = new ArrayList<>(chunks.size());
+        result.add(chunks.get(0));
+        for (int i = 1; i < chunks.size(); i++) {
+            String prev = chunks.get(i - 1);
+            String tail = prev.length() <= overlapChars
+                    ? prev
+                    : prev.substring(prev.length() - overlapChars);
+            result.add(tail + OVERLAP_SEPARATOR + chunks.get(i));
+        }
+        return result;
+    }
+
+    /**
+     * Split a single long block of text into sub-chunks of at most {@code maxChars}
+     * characters, preferring sentence boundary breaks for both Chinese and English.
+     * <p>
+     * Sentence delimiters tried (in priority order):
+     * Chinese: {@code 。}, {@code ！}, {@code ？}; English: {@code .}, {@code !}, {@code ?}.
+     */
     private void splitLongText(String text, int maxChars, List<String> out) {
         int start = 0;
         while (start < text.length()) {
             int end = Math.min(start + maxChars, text.length());
             if (end < text.length()) {
-                int breakAt = text.lastIndexOf('.', end);
-                if (breakAt > start + maxChars / 2) {
+                // Try Chinese sentence delimiters first, then English
+                int breakAt = -1;
+                for (char delim : new char[]{'。', '！', '？', '.', '!', '?'}) {
+                    int pos = lastIndexOf(text, delim, end);
+                    if (pos > start + maxChars / 2 && pos > breakAt) {
+                        breakAt = pos;
+                    }
+                }
+                if (breakAt > start) {
                     end = breakAt + 1;
+                } else {
+                    // Fall back to last whitespace
+                    int wsAt = lastWhitespace(text, end);
+                    if (wsAt > start + maxChars / 2) {
+                        end = wsAt + 1;
+                    }
                 }
             }
-            out.add(text.substring(start, end).strip());
+            String chunk = text.substring(start, end).strip();
+            if (!chunk.isEmpty()) out.add(chunk);
             start = end;
         }
+    }
+
+    private int lastIndexOf(String text, char ch, int fromIndex) {
+        for (int i = Math.min(fromIndex, text.length() - 1); i >= 0; i--) {
+            if (text.charAt(i) == ch) return i;
+        }
+        return -1;
+    }
+
+    private int lastWhitespace(String text, int fromIndex) {
+        for (int i = Math.min(fromIndex, text.length() - 1); i >= 0; i--) {
+            if (Character.isWhitespace(text.charAt(i))) return i;
+        }
+        return -1;
     }
 }

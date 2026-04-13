@@ -171,6 +171,62 @@ public class EvalRunner implements CommandLineRunner {
         System.out.println("╚══════════╩══════════╩══════════╩════════════════════╝");
         System.out.printf("%nOverall Recall@K: %.2f%% (%d/%d)%n",
                 recallRate * 100, (int) (recallRate * results.size()), results.size());
+
+        printScoreDistribution(results);
+    }
+
+    /**
+     * Print top-score percentile distribution and recommend {@code rag.answer.minScore}.
+     * <p>
+     * Helps calibrate the confidence gate without manual labelling: pick the threshold
+     * that sits just below the p10 of answerable queries to minimise false refusals.
+     */
+    private void printScoreDistribution(List<EvalResult> results) {
+        if (results.isEmpty()) return;
+
+        double[] scores = results.stream()
+                .mapToDouble(EvalResult::topScore)
+                .sorted()
+                .toArray();
+
+        double[] answerableScores = results.stream()
+                .filter(EvalResult::recallAtK)
+                .mapToDouble(EvalResult::topScore)
+                .sorted()
+                .toArray();
+
+        System.out.println("\n── Score Distribution (all queries) ─────────────────────");
+        System.out.printf("  p10=%.4f  p25=%.4f  p50=%.4f  p75=%.4f  p90=%.4f  p95=%.4f%n",
+                percentile(scores, 10), percentile(scores, 25), percentile(scores, 50),
+                percentile(scores, 75), percentile(scores, 90), percentile(scores, 95));
+
+        if (answerableScores.length > 0) {
+            System.out.println("\n── Score Distribution (answerable queries only: recallAtK=true) ─");
+            System.out.printf("  p10=%.4f  p25=%.4f  p50=%.4f  p75=%.4f  p90=%.4f  p95=%.4f%n",
+                    percentile(answerableScores, 10), percentile(answerableScores, 25),
+                    percentile(answerableScores, 50), percentile(answerableScores, 75),
+                    percentile(answerableScores, 90), percentile(answerableScores, 95));
+
+            double recommended = percentile(answerableScores, 10);
+            System.out.printf("%n  ℹ Recommended rag.answer.minScore ≈ %.3f%n", recommended);
+            System.out.println("    (p10 of answerable-query scores; adjust up/down to trade precision vs recall)");
+        }
+        System.out.println();
+    }
+
+    /**
+     * Compute the p-th percentile of a pre-sorted array using linear interpolation.
+     *
+     * @param sorted array of values sorted in ascending order (must not be empty)
+     * @param p      percentile to compute, e.g. 50 for median
+     */
+    private double percentile(double[] sorted, int p) {
+        if (sorted.length == 0) return 0.0;
+        double index = (p / 100.0) * (sorted.length - 1);
+        int lo = (int) Math.floor(index);
+        int hi = Math.min(lo + 1, sorted.length - 1);
+        double frac = index - lo;
+        return sorted[lo] + frac * (sorted[hi] - sorted[lo]);
     }
 
     private String truncate(String s, int max) {

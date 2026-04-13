@@ -1,0 +1,66 @@
+# docker-compose.yml — Local Elasticsearch for hybrid (BM25 + vector) RAG
+#
+# Usage:
+#   docker-compose up -d          # start Elasticsearch (detached)
+#   docker-compose down           # stop and remove containers
+#   docker-compose down -v        # stop and also remove the data volume
+#
+# After ES is up, enable hybrid retrieval in application-local.properties:
+#   rag.hybrid.enabled=true
+#   rag.bm25.enabled=true
+#   rag.bm25.elasticsearch.url=http://localhost:9200
+#
+# Then rebuild the index:
+#   curl -X POST http://localhost:8090/api/rag/reindex
+#
+# Verified on macOS M1 Pro (arm64) with Docker Desktop 4.x.
+
+version: "3.8"
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: rag-elasticsearch
+    environment:
+      # Single-node mode — suitable for local development
+      - discovery.type=single-node
+      # Disable security for local dev (no TLS, no authentication required)
+      - xpack.security.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      # Limit heap size for M1 Pro (adjust if you have more RAM to spare)
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # Ensure ES uses the correct JVM path inside the container
+      - bootstrap.memory_lock=false
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    # Allow ES to lock memory on Docker Desktop
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  # Optional: Kibana — useful for inspecting the BM25 index visually.
+  # Uncomment if you want a UI to browse indexed chunks.
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.15.3
+  #   container_name: rag-kibana
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #   ports:
+  #     - "5601:5601"
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+
+volumes:
+  esdata:
+    driver: local
