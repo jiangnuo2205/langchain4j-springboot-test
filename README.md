@@ -274,7 +274,7 @@ rag.hybrid.rrf.vectorWeight=2.0
 rag.hybrid.rrf.bm25Weight=1.0
 ```
 
-#### Why fusedScore (RRF) is NOT suitable for the answer confidence gate
+#### Why fusedScore (RRF) is not suitable for the answer confidence gate
 
 The fused RRF score is a **rank-based** quantity, not a similarity measure:
 
@@ -458,7 +458,7 @@ independent, scale-stable signals:
 | Neither condition met | ❌ REFUSE |
 
 **Why not use fusedScore for the gate?**  
-See [Why fusedScore (RRF) is NOT suitable for the answer confidence gate](#why-fusedscore-rrf-is-not-suitable-for-the-answer-confidence-gate) above.
+See [Why fusedScore (RRF) is not suitable for the answer confidence gate](#why-fusedscore-rrf-is-not-suitable-for-the-answer-confidence-gate) above.
 
 **Gate diagnostics** are included in the `/api/rag/ask` response:
 
