@@ -182,6 +182,27 @@ docker-compose up -d
 
 # Verify it's healthy
 curl http://localhost:9200/_cluster/health
+
+cd /Volumes/G/docker-file
+
+# 启动
+docker compose up -d
+
+# 查看状态
+docker compose ps
+
+# 查看日志
+docker compose logs elasticsearch
+
+# 停止（容器停止，数据保留）
+docker compose down
+
+# 停止并删除数据
+docker compose down -v
+
+# 重启
+docker compose restart
+
 ```
 
 > **M1 Pro note:** The compose file is configured with `ES_JAVA_OPTS=-Xms512m -Xmx512m`
