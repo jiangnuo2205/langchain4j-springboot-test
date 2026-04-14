@@ -16,9 +16,9 @@ python3 "$ROOT/eval/run_eval_csv.py" \
   "$ROOT/$OUT_DIR"
 
 
-# 会输出：
-# ${OUT_DIR}_report.csv
-# ${OUT_DIR}_topk.csv
+# 会输出（以 OUT_DIR=eval/perf 为例）：
+# eval/perf_report.csv
+# eval/perf_topk.csv
 
 
 # 或者直接用 python3 eval/run_eval_csv.py eval/eval_cases.v3.docIdFilename_Version2.jsonl eval/perf

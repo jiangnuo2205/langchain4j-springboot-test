@@ -754,7 +754,7 @@ public class RagService {
             Map<String, Object> r = vectorResults.get(i);
             String sourceId = (String) r.get("sourceId");
             if (sourceId == null) continue;
-            double rrf = vw * (1.0 / (k + i + 1));
+            double rrf = rrfContribution(i, k, vw);
             rrfScores.merge(sourceId, rrf, Double::sum);
             docData.putIfAbsent(sourceId, r);
         }
@@ -763,7 +763,7 @@ public class RagService {
         for (int i = 0; i < bm25Results.size(); i++) {
             Bm25IndexService.BM25Hit hit = bm25Results.get(i);
             String chunkId = hit.chunkId();
-            double rrf = bw * (1.0 / (k + i + 1));
+            double rrf = rrfContribution(i, k, bw);
             rrfScores.merge(chunkId, rrf, Double::sum);
             if (!docData.containsKey(chunkId)) {
                 // Build a result map from the BM25 hit (chunk was not in vector results)
@@ -830,6 +830,18 @@ public class RagService {
         metaMap.put("chunkStrategy", "bm25");
         entry.put("metadata", metaMap);
         return entry;
+    }
+
+    /**
+     * Compute the weighted RRF contribution for a single document at the given 0-based rank.
+     *
+     * @param rank   0-based rank within a retriever's result list
+     * @param k      RRF dampening constant (rag.hybrid.rrf.k)
+     * @param weight retriever-specific weight (vectorWeight or bm25Weight)
+     * @return weighted RRF score contribution: {@code weight / (k + rank + 1)}
+     */
+    private static double rrfContribution(int rank, int k, double weight) {
+        return weight / (k + rank + 1);
     }
 
     /**
