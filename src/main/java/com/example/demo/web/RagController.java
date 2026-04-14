@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,17 +40,37 @@ public class RagController {
     /**
      * Debug retrieval quality: returns topK matches with scores and metadata.
      * GET /api/rag/search?q=your+question&amp;k=5  (k overrides default topK when &gt; 0)
+     * <p>
+     * When {@code rag.queryRewrite.enabled=true}, also applies query rewriting (Strategy B)
+     * and returns a {@code rewriteDiagnostics} field in the response.
      */
     @GetMapping("/search")
     public Map<String, Object> search(
             @RequestParam(name = "q") String question,
             @RequestParam(name = "k", defaultValue = "0") int k) {
-        List<Map<String, Object>> results = ragService.retrieveWithScores(question, k > 0 ? k : null);
-        log.info("rag.search question='{}' k={} results={}", question, k, results.size());
-        return Map.of(
-                "question", question,
-                "results", results
-        );
+        RagService.SearchResponse sr = ragService.searchWithDiagnostics(question, k > 0 ? k : null);
+        log.info("rag.search question='{}' k={} results={} rewriteEnabled={} ruleRan={} llmRan={}",
+                question, k, sr.results().size(),
+                sr.rewriteDiagnostics().rewriteEnabled(),
+                sr.rewriteDiagnostics().ruleExpansionRan(),
+                sr.rewriteDiagnostics().llmExpansionRan());
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("question", question);
+        response.put("results", sr.results());
+        response.put("rewriteDiagnostics", buildDiagnosticsMap(sr.rewriteDiagnostics()));
+        return response;
+    }
+
+    private Map<String, Object> buildDiagnosticsMap(RagService.SearchDiagnostics d) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("rewriteEnabled", d.rewriteEnabled());
+        m.put("ruleExpansionRan", d.ruleExpansionRan());
+        m.put("llmExpansionRan", d.llmExpansionRan());
+        if (d.llmProvider() != null) m.put("llmProvider", d.llmProvider());
+        m.put("variantQueries", d.variantQueries());
+        m.put("triggerReason", d.triggerReason());
+        return m;
     }
 
     @GetMapping("/stats")

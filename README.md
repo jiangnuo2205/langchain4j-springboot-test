@@ -1,6 +1,6 @@
 # LangChain4j + Spring Boot — Pluggable RAG Demo
 
-A Spring Boot project integrating LangChain4j with **pluggable LLM and Embedding providers** (DashScope / Ollama) and a **pluggable vector store** (InMemory / Chroma), with optional **hybrid retrieval** (Vector + BM25 via Elasticsearch) and structural chunking with overlap.
+A Spring Boot project integrating LangChain4j with **pluggable LLM and Embedding providers** (DashScope / Ollama) and a **pluggable vector store** (InMemory / Chroma), with optional **hybrid retrieval** (Vector + BM25 via Elasticsearch), **short-query rewriting** (rule expansion + LLM multi-query), and structural chunking with overlap.
 
 ---
 
@@ -15,7 +15,14 @@ graph TD
         B --> E[(Elasticsearch BM25)]
     end
     subgraph Query
-        Q[Question] --> F[EmbeddingModel]
+        Q[Question] --> RW{queryRewrite?}
+        RW -- enabled --> RWR[Rule Expansion]
+        RWR --> RWRRF[Multi-Query RRF]
+        RWRRF --> LLM_T{low confidence?}
+        LLM_T -- yes --> LLM_RW[LLM Multi-Query\nOllama→DashScope]
+        LLM_RW --> RWRRF
+        RW -- disabled --> F[EmbeddingModel]
+        RWRRF --> F
         F --> G[Vector Search]
         D --> G
         Q --> H[BM25 Search]
@@ -316,6 +323,7 @@ curl "http://localhost:8090/api/rag/stats?n=20"
 | `rag.bm25.indexName` | `rag-chunks` | `RAG_BM25_INDEX_NAME` | Elasticsearch index name |
 | `rag.hybrid.candidateK` | `50` | `RAG_HYBRID_CANDIDATE_K` | Candidates per retriever before fusion |
 | `rag.hybrid.rrf.k` | `60` | `RAG_HYBRID_RRF_K` | RRF constant k |
+| `rag.queryRewrite.enabled` | `false` | `RAG_QUERY_REWRITE_ENABLED` | Enable short-query rewriting |
 
 ### Chunking Strategy
 
@@ -403,6 +411,169 @@ When `rag.rerank.enabled=true`, after retrieving `topK` chunks the system asks t
 
 > **M1 Pro note:** Rerank is off by default (`rag.rerank.enabled=false`) to keep latency
 > low on CPU-only hardware. Enable it selectively for high-value queries.
+
+---
+
+## Query Rewriting (Strategy B)
+
+Query rewriting improves retrieval quality for short Chinese queries (e.g. 假期, 薪酬, 资产化)
+by generating multiple query variants before retrieval and fusing results via multi-query RRF.
+
+### Strategy B (default)
+
+1. **Rule expansion** (always runs first, zero LLM cost): generates suffix variants such as  
+   `资产化` → `资产化能力`, `资产化平台`, `资产化流程`
+2. **LLM multi-query** (triggered only when short query AND fused top-1 score is still low):  
+   calls the configured chat model (Ollama by default, DashScope as fallback) to produce  
+   2–3 semantically diverse query variants.
+3. **Multi-query RRF fusion**: retrieval is run for each variant and results are fused  
+   across all (variant, retriever) rankings using RRF.
+
+### Enabling Query Rewriting
+
+Add to `src/main/resources/application-local.properties`:
+
+```properties
+# Enable Strategy B query rewriting
+rag.queryRewrite.enabled=true
+
+# LLM provider for rewrite calls (default: ollama; fallback: dashscope)
+rag.queryRewrite.provider=ollama
+rag.queryRewrite.fallbackProvider=dashscope
+
+# Short-query range: only queries within this character-count range trigger expansion
+rag.queryRewrite.shortQuery.minLen=2
+rag.queryRewrite.shortQuery.maxLen=6
+
+# Rule expansion (always-on for short queries when rewriting is enabled)
+rag.queryRewrite.ruleExpansion.enabled=true
+rag.queryRewrite.ruleExpansion.maxVariants=3
+
+# LLM expansion (conditional: only fires when topScore < minTopScore)
+rag.queryRewrite.llmExpansion.enabled=true
+rag.queryRewrite.llmExpansion.maxVariants=3
+
+# LLM trigger threshold: lower = LLM fires less often (more conservative)
+rag.queryRewrite.llmTrigger.minTopScore=0.02
+```
+
+> **M1 Pro note:** The LLM trigger threshold (`0.02`) is intentionally conservative.
+> With RRF scores in the `0.01–0.03` range even for good matches, the LLM will only
+> fire for genuinely zero-recall queries. Increase to `0.03` if you want LLM to trigger
+> more often.
+
+### Query Rewriting Configuration Reference
+
+| Property | Default | Env Var | Description |
+|----------|---------|---------|-------------|
+| `rag.queryRewrite.enabled` | `false` | `RAG_QUERY_REWRITE_ENABLED` | Enable query rewriting |
+| `rag.queryRewrite.provider` | `ollama` | `RAG_QUERY_REWRITE_PROVIDER` | Primary LLM provider for rewriting |
+| `rag.queryRewrite.fallbackProvider` | `dashscope` | `RAG_QUERY_REWRITE_FALLBACK_PROVIDER` | Fallback LLM provider |
+| `rag.queryRewrite.shortQuery.minLen` | `2` | `RAG_QUERY_REWRITE_SHORT_MIN_LEN` | Min query length (chars) for expansion |
+| `rag.queryRewrite.shortQuery.maxLen` | `6` | `RAG_QUERY_REWRITE_SHORT_MAX_LEN` | Max query length (chars) for expansion |
+| `rag.queryRewrite.ruleExpansion.enabled` | `true` | `RAG_QUERY_REWRITE_RULE_ENABLED` | Enable rule-based expansion |
+| `rag.queryRewrite.ruleExpansion.maxVariants` | `3` | `RAG_QUERY_REWRITE_RULE_MAX_VARIANTS` | Max rule variants to generate |
+| `rag.queryRewrite.llmExpansion.enabled` | `true` | `RAG_QUERY_REWRITE_LLM_ENABLED` | Enable LLM multi-query rewrite |
+| `rag.queryRewrite.llmExpansion.maxVariants` | `3` | `RAG_QUERY_REWRITE_LLM_MAX_VARIANTS` | Max LLM variants to generate |
+| `rag.queryRewrite.llmTrigger.minTopScore` | `0.02` | `RAG_QUERY_REWRITE_LLM_TRIGGER_SCORE` | Fused score threshold to trigger LLM |
+
+### Search Response with Diagnostics
+
+When rewriting is enabled, `/api/rag/search` returns an extra `rewriteDiagnostics` field:
+
+```json
+{
+  "question": "资产化",
+  "results": [...],
+  "rewriteDiagnostics": {
+    "rewriteEnabled": true,
+    "ruleExpansionRan": true,
+    "llmExpansionRan": false,
+    "variantQueries": ["资产化", "资产化能力", "资产化平台", "资产化流程"],
+    "triggerReason": "rule_expansion"
+  }
+}
+```
+
+Individual result entries may include a `matchedVariants` field when multiple variant
+queries retrieved the same chunk:
+
+```json
+{
+  "sourceId": "...",
+  "score": 0.0314,
+  "matchedVariants": ["资产化", "资产化能力"],
+  ...
+}
+```
+
+---
+
+## Short-Query Regression Runner
+
+A regression runner lets you compare retrieval quality for a fixed set of short queries
+before and after configuration changes — without needing manual labels.
+
+The runner tests these 5 short queries: **假期 · 薪酬 · 资产化 · 绩效 · 领导力**
+
+### Option A: Shell script (recommended)
+
+```bash
+# Run against local server (default port 8090, k=10)
+./eval/short_query_regression.sh
+
+# Custom URL and k
+./eval/short_query_regression.sh http://localhost:8090 10
+```
+
+Sample output:
+
+```
+════════════════════════════════════════════════════════════════
+Query: [资产化]
+
+Rewrite diagnostics:
+  enabled       : true
+  ruleRan       : true
+  llmRan        : false
+  triggerReason : rule_expansion
+  variants      : 资产化, 资产化能力, 资产化平台, 资产化流程
+
+Results: 10
+
+   1. score=0.04166  WEF_Global_Lighthouse_Network_2025_CN.txt#chunk=68
+      行资产化, 实现规| 准手册、程序和工具...
+   2. score=0.03333  企业数字化转型对绩效的影响研究.txt#chunk=25 [matched: 资产化 资产化能力]
+      化战略的实施助力南钢股份...
+...
+```
+
+### Option B: Java runner
+
+```bash
+# Start the Spring Boot server first, then:
+mvn compile exec:java -Dexec.mainClass=com.example.demo.eval.ShortQueryRegressionRunner
+
+# Custom URL and k
+mvn compile exec:java \
+  -Dexec.mainClass=com.example.demo.eval.ShortQueryRegressionRunner \
+  -Dexec.args="http://localhost:8090 10"
+```
+
+### Workflow: before/after comparison
+
+```bash
+# 1. Run with rewriting OFF (baseline)
+# Set rag.queryRewrite.enabled=false in application-local.properties
+./eval/short_query_regression.sh > /tmp/before.txt
+
+# 2. Enable rewriting and restart server, then run again
+# Set rag.queryRewrite.enabled=true
+./eval/short_query_regression.sh > /tmp/after.txt
+
+# 3. Compare
+diff /tmp/before.txt /tmp/after.txt
+```
 
 ---
 
