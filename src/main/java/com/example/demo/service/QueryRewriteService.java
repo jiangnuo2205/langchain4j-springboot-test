@@ -139,7 +139,7 @@ public class QueryRewriteService {
         if (ruleExpansionEnabled && isShort) {
             List<String> ruleVariants = ruleExpand(query);
             for (String v : ruleVariants) {
-                if (!variants.contains(v) && variants.size() <= ruleExpansionMaxVariants + 1) {
+                if (!variants.contains(v) && variants.size() < ruleExpansionMaxVariants + 1) {
                     variants.add(v);
                 }
             }
@@ -196,7 +196,7 @@ public class QueryRewriteService {
         }
 
         // Morphological split expansion: "资产化" → "资产" (for BM25 friendliness)
-        if (q.length() >= 3 && variants.size() < ruleExpansionMaxVariants + 1) {
+        if (q.length() >= 3 && variants.size() < ruleExpansionMaxVariants) {
             char last = q.charAt(q.length() - 1);
             if (last == '化' || last == '性' || last == '力' || last == '感') {
                 String stem = q.substring(0, q.length() - 1);

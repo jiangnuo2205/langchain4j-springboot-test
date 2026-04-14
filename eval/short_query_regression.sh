@@ -80,7 +80,7 @@ for q in "${QUERIES[@]}"; do
       (.value.score | tostring | .[0:8]),
       (.value.sourceId // "-"),
       (.value.textPreview // "-" | gsub("\n"; " ") | .[0:120])
-    ] | "  \(.[0] | ltrimstr("0") | if . == "" then "0" else . end). score=\(.[1])  \(.[2])\n     \(.[3])"
+    ] | "  \(.[0]). score=\(.[1])  \(.[2])\n     \(.[3])"
   ' 2>/dev/null || echo "  (no results)"
 
   echo ""

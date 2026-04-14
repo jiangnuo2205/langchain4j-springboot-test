@@ -540,7 +540,7 @@ public class RagService {
 
         boolean ruleRan = phase1.ruleExpansionRan();
         String triggerReason = (ruleRan && llmRan) ? "rule_expansion+llm"
-                : (ruleRan ? "rule_expansion" : "original");
+                : (ruleRan ? "rule_expansion" : (llmRan ? "llm" : "original"));
 
         SearchDiagnostics diag = new SearchDiagnostics(
                 true, ruleRan, llmRan, llmProvider,
