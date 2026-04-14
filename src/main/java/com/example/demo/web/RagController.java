@@ -33,8 +33,12 @@ public class RagController {
     @PostMapping("/ask")
     public RagAskResponse ask(@Valid @RequestBody RagAskRequest req) {
         List<String> chunks = ragService.retrieve(req.question());
-        String answer = ragService.ask(req.question());
-        return new RagAskResponse(req.question(), answer, chunks);
+        RagService.AskResult askResult = ragService.ask(req.question());
+        return new RagAskResponse(
+                req.question(),
+                askResult.answer(),
+                chunks,
+                buildGateDiagnosticsMap(askResult.gateDiagnostics()));
     }
 
     /**
@@ -60,6 +64,20 @@ public class RagController {
         response.put("results", sr.results());
         response.put("rewriteDiagnostics", buildDiagnosticsMap(sr.rewriteDiagnostics()));
         return response;
+    }
+
+    private Map<String, Object> buildGateDiagnosticsMap(RagService.GateDiagnostics d) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("gateEnabled", d.gateEnabled());
+        m.put("hybridGate", d.hybridGate());
+        if (d.vectorTop1Score() >= 0) m.put("vectorTop1Score", d.vectorTop1Score());
+        if (d.bm25Hits() >= 0) m.put("bm25Hits", d.bm25Hits());
+        m.put("vectorStrong", d.vectorStrong());
+        m.put("vectorWeak", d.vectorWeak());
+        if (d.bm25MinHits() >= 0) m.put("bm25MinHits", d.bm25MinHits());
+        m.put("pass", d.pass());
+        m.put("decision", d.decision());
+        return m;
     }
 
     private Map<String, Object> buildDiagnosticsMap(RagService.SearchDiagnostics d) {

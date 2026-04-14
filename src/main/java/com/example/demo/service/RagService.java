@@ -62,9 +62,18 @@ public class RagService {
     private final boolean hybridEnabled;
     private final int hybridRrfK;
     private final int hybridCandidateK;
+    private final double hybridRrfVectorWeight;
+    private final double hybridRrfBm25Weight;
 
     // Confidence gate for answer refusal
     private final double answerMinScore;
+
+    // New hybrid-aware confidence gate
+    private final boolean gateEnabled;
+    private final double gateVectorStrong;
+    private final double gateVectorWeak;
+    private final int gateBm25MinHits;
+    private final int bm25SearchTopN;
 
     /** Optional BM25 service; null when rag.bm25.enabled=false. */
     @Autowired(required = false)
@@ -112,7 +121,14 @@ public class RagService {
             @Value("${rag.hybrid.enabled:false}") boolean hybridEnabled,
             @Value("${rag.hybrid.rrf.k:60}") int hybridRrfK,
             @Value("${rag.hybrid.candidateK:50}") int hybridCandidateK,
-            @Value("${rag.answer.minScore:0.35}") double answerMinScore
+            @Value("${rag.answer.minScore:0.35}") double answerMinScore,
+            @Value("${rag.hybrid.rrf.vectorWeight:1.0}") double hybridRrfVectorWeight,
+            @Value("${rag.hybrid.rrf.bm25Weight:1.0}") double hybridRrfBm25Weight,
+            @Value("${rag.answer.gate.enabled:true}") boolean gateEnabled,
+            @Value("${rag.answer.gate.vectorStrong:0.55}") double gateVectorStrong,
+            @Value("${rag.answer.gate.vectorWeak:0.30}") double gateVectorWeak,
+            @Value("${rag.answer.gate.bm25MinHits:1}") int gateBm25MinHits,
+            @Value("${rag.bm25.searchTopN:50}") int bm25SearchTopN
 
     ) {
         this.embeddingModel = embeddingModel;
@@ -136,12 +152,20 @@ public class RagService {
         this.hybridRrfK = hybridRrfK;
         this.hybridCandidateK = Math.min(hybridCandidateK, 50);
         this.answerMinScore = answerMinScore;
+        this.hybridRrfVectorWeight = hybridRrfVectorWeight;
+        this.hybridRrfBm25Weight = hybridRrfBm25Weight;
+        this.gateEnabled = gateEnabled;
+        this.gateVectorStrong = gateVectorStrong;
+        this.gateVectorWeak = gateVectorWeak;
+        this.gateBm25MinHits = gateBm25MinHits;
+        this.bm25SearchTopN = bm25SearchTopN;
     }
 
     @PostConstruct
     void logConfig() {
-        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={} hybridEnabled={} answerMinScore={}",
-                vectorStore, embeddingProvider, llmProvider, docsDir, hybridEnabled, answerMinScore);
+        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={} hybridEnabled={} answerMinScore={} gateEnabled={} gateVectorStrong={} gateVectorWeak={} gateBm25MinHits={}",
+                vectorStore, embeddingProvider, llmProvider, docsDir, hybridEnabled, answerMinScore,
+                gateEnabled, gateVectorStrong, gateVectorWeak, gateBm25MinHits);
     }
 
     /** Stats: index state summary for observability without heap dumps. */
@@ -403,6 +427,44 @@ public class RagService {
         }
         return retrieveVectorOnly(question, maxResults);
     }
+
+    // ── Gate diagnostics records ───────────────────────────────────────────────
+
+    /**
+     * Diagnostics for the answer confidence gate decision in {@link #ask}.
+     *
+     * @param gateEnabled       whether the gate was active for this request
+     * @param hybridGate        whether the hybrid (vectorTop1 + bm25Hits) gate was used
+     * @param vectorTop1Score   top-1 cosine score from vector retrieval ({@code -1} if not computed)
+     * @param bm25Hits          number of BM25 hits within the search window ({@code -1} if not computed)
+     * @param vectorStrong      configured strong-pass threshold
+     * @param vectorWeak        configured weak-pass threshold
+     * @param bm25MinHits       configured minimum BM25 hits required for weak-pass
+     * @param pass              {@code true} when the gate was passed (LLM was called)
+     * @param decision          human-readable decision reason
+     */
+    public record GateDiagnostics(
+            boolean gateEnabled,
+            boolean hybridGate,
+            double vectorTop1Score,
+            int bm25Hits,
+            double vectorStrong,
+            double vectorWeak,
+            int bm25MinHits,
+            boolean pass,
+            String decision
+    ) {}
+
+    /**
+     * Result of {@link #ask}: the generated answer plus gate diagnostics.
+     *
+     * @param answer           the LLM-generated answer or refusal message
+     * @param gateDiagnostics  diagnostics about the confidence gate decision
+     */
+    public record AskResult(
+            String answer,
+            GateDiagnostics gateDiagnostics
+    ) {}
 
     // ── Query-rewrite diagnostics records ─────────────────────────────────────
 
@@ -700,7 +762,7 @@ public class RagService {
             Map<String, Object> r = vectorResults.get(i);
             String sourceId = (String) r.get("sourceId");
             if (sourceId == null) continue;
-            double rrf = 1.0 / (k + i + 1);
+            double rrf = hybridRrfVectorWeight / (k + i + 1);
             rrfScores.merge(sourceId, rrf, Double::sum);
             docData.putIfAbsent(sourceId, r);
         }
@@ -709,7 +771,7 @@ public class RagService {
         for (int i = 0; i < bm25Results.size(); i++) {
             Bm25IndexService.BM25Hit hit = bm25Results.get(i);
             String chunkId = hit.chunkId();
-            double rrf = 1.0 / (k + i + 1);
+            double rrf = hybridRrfBm25Weight / (k + i + 1);
             rrfScores.merge(chunkId, rrf, Double::sum);
             if (!docData.containsKey(chunkId)) {
                 // Build a result map from the BM25 hit (chunk was not in vector results)
@@ -781,38 +843,119 @@ public class RagService {
     /**
      * Retrieve relevant chunks and answer the question using the chat model.
      * <p>
-     * Applies a confidence gate: if retrieval returns no results or the top chunk
-     * score is below {@code rag.answer.minScore}, a refusal message is returned
-     * instead of calling the LLM with low-quality context.
+     * When {@code rag.hybrid.enabled=true} and {@code rag.answer.gate.enabled=true},
+     * the gate uses two independent signals: the vector-retrieval top-1 cosine score
+     * ({@code vectorTop1Score}) and the number of BM25 hits ({@code bm25Hits}) within
+     * the configured search window. The gate passes when:
+     * <ul>
+     *   <li>{@code vectorTop1Score >= rag.answer.gate.vectorStrong}, or</li>
+     *   <li>{@code vectorTop1Score >= rag.answer.gate.vectorWeak} AND
+     *       {@code bm25Hits >= rag.answer.gate.bm25MinHits}</li>
+     * </ul>
+     * In non-hybrid mode the gate falls back to the legacy {@code rag.answer.minScore}
+     * threshold for backward compatibility.
      * <p>
      * Optionally applies LLM-based reranking when rag.rerank.enabled=true.
      */
-    public String ask(String question) {
+    public AskResult ask(String question) {
+        // ── Empty-result fast path ─────────────────────────────────────────────
         List<Map<String, Object>> results = retrieveWithScores(question);
 
         if (results.isEmpty()) {
             log.info("rag.ask confidence gate: no retrieval results question='{}'", question);
-            return "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。\n\n"
+            String refusal = "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。\n\n"
                     + "Sorry, no relevant content was found in the knowledge base for your question. "
                     + "Please try rephrasing or check whether the topic is covered.";
+            GateDiagnostics gd = new GateDiagnostics(
+                    gateEnabled, false, -1, -1,
+                    gateVectorStrong, gateVectorWeak, gateBm25MinHits,
+                    false, "no_results");
+            return new AskResult(refusal, gd);
         }
 
-        double topScore = (double) results.get(0).get("score");
-        if (answerMinScore > 0.0 && topScore < answerMinScore) {
-            log.info("rag.ask confidence gate triggered topScore={} answerMinScore={} question='{}'",
-                    topScore, answerMinScore, question);
-            return String.format(
-                    "抱歉，我没有找到足够可信的相关内容来回答您的问题（最高相关度 %.3f，阈值 %.3f）。"
-                            + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
-                            + "Sorry, the retrieved content confidence (%.3f) is below the required threshold (%.3f). "
-                            + "Please rephrase your question or check if the topic is in scope.",
-                    topScore, answerMinScore, topScore, answerMinScore);
+        // ── Confidence gate ────────────────────────────────────────────────────
+        if (gateEnabled && hybridEnabled && bm25IndexService != null) {
+            // Hybrid gate: use vectorTop1Score + bm25Hits (independent of fusedScore)
+            List<Map<String, Object>> vectorTop1 = retrieveVectorOnly(question, 1);
+            double vectorTop1Score = vectorTop1.isEmpty() ? 0.0 : (double) vectorTop1.get(0).get("score");
+
+            int bm25Hits = 0;
+            try {
+                bm25Hits = bm25IndexService.search(question, bm25SearchTopN).size();
+            } catch (Exception e) {
+                log.warn("rag.ask gate bm25 search failed err={}", e.getMessage());
+            }
+
+            boolean pass = vectorTop1Score >= gateVectorStrong
+                    || (vectorTop1Score >= gateVectorWeak && bm25Hits >= gateBm25MinHits);
+
+            String decision = pass
+                    ? (vectorTop1Score >= gateVectorStrong ? "pass_vector_strong" : "pass_vector_weak_bm25")
+                    : "refused";
+
+            log.info("rag.ask gate: vectorTop1Score={} bm25Hits={} vectorStrong={} vectorWeak={} bm25MinHits={} pass={} decision={} question='{}'",
+                    vectorTop1Score, bm25Hits, gateVectorStrong, gateVectorWeak, gateBm25MinHits,
+                    pass, decision, question);
+
+            GateDiagnostics gd = new GateDiagnostics(
+                    true, true, vectorTop1Score, bm25Hits,
+                    gateVectorStrong, gateVectorWeak, gateBm25MinHits,
+                    pass, decision);
+
+            if (!pass) {
+                String refusal = String.format(
+                        "抱歉，我没有找到足够可信的相关内容来回答您的问题（向量相似度 %.3f，BM25命中数 %d）。"
+                                + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
+                                + "Sorry, the retrieved content does not meet the confidence threshold "
+                                + "(vectorTop1=%.3f, bm25Hits=%d). "
+                                + "Please rephrase your question or check if the topic is in scope.",
+                        vectorTop1Score, bm25Hits, vectorTop1Score, bm25Hits);
+                return new AskResult(refusal, gd);
+            }
+
+            // Gate passed – proceed to answer
+            List<Map<String, Object>> contextResults = rerankEnabled ? rerank(question, results) : results;
+            String answer = buildAndChat(question, contextResults);
+            return new AskResult(answer, gd);
+
+        } else if (gateEnabled && answerMinScore > 0.0) {
+            // Legacy gate: use fusedScore (or vector cosine in non-hybrid mode)
+            double topScore = (double) results.get(0).get("score");
+            GateDiagnostics gd = new GateDiagnostics(
+                    true, false, topScore, -1,
+                    answerMinScore, answerMinScore, -1,
+                    topScore >= answerMinScore,
+                    topScore >= answerMinScore ? "pass_legacy" : "refused_legacy");
+
+            if (topScore < answerMinScore) {
+                log.info("rag.ask confidence gate triggered topScore={} answerMinScore={} question='{}'",
+                        topScore, answerMinScore, question);
+                String refusal = String.format(
+                        "抱歉，我没有找到足够可信的相关内容来回答您的问题（最高相关度 %.3f，阈值 %.3f）。"
+                                + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
+                                + "Sorry, the retrieved content confidence (%.3f) is below the required threshold (%.3f). "
+                                + "Please rephrase your question or check if the topic is in scope.",
+                        topScore, answerMinScore, topScore, answerMinScore);
+                return new AskResult(refusal, gd);
+            }
+
+            List<Map<String, Object>> contextResults = rerankEnabled ? rerank(question, results) : results;
+            String answer = buildAndChat(question, contextResults);
+            return new AskResult(answer, gd);
         }
 
-        List<Map<String, Object>> contextResults = rerankEnabled
-                ? rerank(question, results)
-                : results;
+        // Gate disabled
+        GateDiagnostics gd = new GateDiagnostics(
+                false, false, -1, -1,
+                gateVectorStrong, gateVectorWeak, gateBm25MinHits,
+                true, "disabled");
+        List<Map<String, Object>> contextResults = rerankEnabled ? rerank(question, results) : results;
+        String answer = buildAndChat(question, contextResults);
+        return new AskResult(answer, gd);
+    }
 
+    /** Build context string from results and call the chat model. */
+    private String buildAndChat(String question, List<Map<String, Object>> contextResults) {
         StringBuilder context = new StringBuilder();
         for (int i = 0; i < contextResults.size(); i++) {
             String text = (String) contextResults.get(i).get("text");
@@ -820,11 +963,9 @@ public class RagService {
                 context.append("[").append(i + 1).append("] ").append(text).append("\n\n");
             }
         }
-
         String prompt = "Use the following context to answer the question.\n\n"
                 + "Context:\n" + context
                 + "Question: " + question;
-
         return chatModel.chat(prompt);
     }
 
