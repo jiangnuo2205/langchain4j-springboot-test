@@ -70,6 +70,10 @@ public class RagService {
     @Autowired(required = false)
     private Bm25IndexService bm25IndexService;
 
+    /** Optional query rewrite service; always present but no-ops when disabled. */
+    @Autowired(required = false)
+    private QueryRewriteService queryRewriteService;
+
     // Captured during the first successful reindex; used in stats for observability.
     private volatile int lastEmbeddingDim = 0;
 
@@ -400,7 +404,172 @@ public class RagService {
         return retrieveVectorOnly(question, maxResults);
     }
 
-    // ── Vector-only retrieval (original logic) ─────────────────────────────────
+    // ── Query-rewrite diagnostics records ─────────────────────────────────────
+
+    /**
+     * Diagnostics for the query rewriting step in a search response.
+     *
+     * @param rewriteEnabled   whether query rewriting is on
+     * @param ruleExpansionRan whether rule-based expansion was applied
+     * @param llmExpansionRan  whether LLM multi-query was triggered
+     * @param llmProvider      LLM provider used for rewriting ({@code null} if not triggered)
+     * @param variantQueries   all query variants used for retrieval (original always first)
+     * @param triggerReason    human-readable reason string
+     */
+    public record SearchDiagnostics(
+            boolean rewriteEnabled,
+            boolean ruleExpansionRan,
+            boolean llmExpansionRan,
+            String llmProvider,
+            List<String> variantQueries,
+            String triggerReason
+    ) {}
+
+    /**
+     * Extended search response that includes both retrieved results and rewrite diagnostics.
+     *
+     * @param results            ranked list of retrieved chunks (same structure as {@link #retrieveWithScores})
+     * @param rewriteDiagnostics diagnostics about query rewriting
+     */
+    public record SearchResponse(
+            List<Map<String, Object>> results,
+            SearchDiagnostics rewriteDiagnostics
+    ) {}
+
+    /**
+     * Search with optional query rewriting (Strategy B).
+     * <p>
+     * When {@code rag.queryRewrite.enabled=true}:
+     * <ol>
+     *   <li>Applies rule-based expansion for short queries.</li>
+     *   <li>Runs retrieval for each variant and fuses results via multi-query RRF.</li>
+     *   <li>If the fused top score is below {@code rag.queryRewrite.llmTrigger.minTopScore},
+     *       additionally triggers LLM multi-query and re-fuses.</li>
+     * </ol>
+     * When rewriting is disabled, falls back to {@link #retrieveWithScores}.
+     *
+     * @param question   the query text
+     * @param maxResults override for topK (null = use configured topK)
+     */
+    public SearchResponse searchWithDiagnostics(String question, Integer maxResults) {
+        int limit = maxResults != null ? maxResults : topK;
+
+        if (queryRewriteService == null || !queryRewriteService.isEnabled()) {
+            List<Map<String, Object>> results = retrieveWithScores(question, maxResults);
+            SearchDiagnostics diag = new SearchDiagnostics(
+                    false, false, false, null, List.of(question), "disabled");
+            return new SearchResponse(results, diag);
+        }
+
+        // ── Phase 1: Rule expansion ────────────────────────────────────────────
+        QueryRewriteService.RewriteResult phase1 = queryRewriteService.ruleOnlyRewrite(question);
+        List<String> allVariants = new ArrayList<>(phase1.variantQueries());
+
+        // ── Phase 2: Retrieve for all phase-1 variants and fuse ───────────────
+        // Use a generous candidateK so fusion has enough raw candidates.
+        int candidateK = Math.max(hybridCandidateK, limit * 3);
+        Map<String, Double> rrfScores = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> docData = new LinkedHashMap<>();
+        Map<String, Set<String>> docVariants = new LinkedHashMap<>();
+
+        for (String variant : allVariants) {
+            List<Map<String, Object>> variantResults = retrieveWithScores(variant, candidateK);
+            for (int rank = 0; rank < variantResults.size(); rank++) {
+                Map<String, Object> r = variantResults.get(rank);
+                String id = (String) r.get("sourceId");
+                if (id == null) continue;
+                double rrf = 1.0 / (hybridRrfK + rank + 1);
+                rrfScores.merge(id, rrf, Double::sum);
+                docData.putIfAbsent(id, r);
+                docVariants.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(variant);
+            }
+        }
+
+        // Fused top score after phase-1
+        double topScore = rrfScores.values().stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+
+        // ── Phase 3: Maybe trigger LLM multi-query ────────────────────────────
+        boolean llmRan = false;
+        String llmProvider = null;
+        List<String> llmVariants = queryRewriteService.maybeLlmRewrite(question, topScore);
+
+        if (!llmVariants.isEmpty()) {
+            llmRan = true;
+            llmProvider = queryRewriteService.getPrimaryProviderName();
+            for (String lv : llmVariants) {
+                if (!allVariants.contains(lv)) {
+                    allVariants.add(lv);
+                    List<Map<String, Object>> lvResults = retrieveWithScores(lv, candidateK);
+                    for (int rank = 0; rank < lvResults.size(); rank++) {
+                        Map<String, Object> r = lvResults.get(rank);
+                        String id = (String) r.get("sourceId");
+                        if (id == null) continue;
+                        double rrf = 1.0 / (hybridRrfK + rank + 1);
+                        rrfScores.merge(id, rrf, Double::sum);
+                        docData.putIfAbsent(id, r);
+                        docVariants.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(lv);
+                    }
+                }
+            }
+        }
+
+        // ── Sort by fused RRF score ────────────────────────────────────────────
+        List<String> sortedIds = rrfScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .toList();
+
+        // ── Build merged list with per-result diagnostics ─────────────────────
+        List<Map<String, Object>> merged = new ArrayList<>(sortedIds.size());
+        for (String id : sortedIds) {
+            Map<String, Object> r = new LinkedHashMap<>(docData.get(id));
+            r.put("score", rrfScores.get(id));
+            Set<String> matchedVars = docVariants.get(id);
+            // Only annotate when multiple variants contributed (extra signal)
+            if (matchedVars != null && matchedVars.size() > 1) {
+                r.put("matchedVariants", new ArrayList<>(matchedVars));
+            }
+            merged.add(r);
+        }
+
+        log.debug("rag.search rewrite variants={} merged={} topScore={} llmRan={}",
+                allVariants.size(), merged.size(), topScore, llmRan);
+
+        // ── Apply maxChunksPerDoc diversification ─────────────────────────────
+        List<Map<String, Object>> results = applyMaxChunksPerDoc(merged, limit);
+
+        boolean ruleRan = phase1.ruleExpansionRan();
+        String triggerReason = (ruleRan && llmRan) ? "rule_expansion+llm"
+                : (ruleRan ? "rule_expansion" : (llmRan ? "llm" : "original"));
+
+        SearchDiagnostics diag = new SearchDiagnostics(
+                true, ruleRan, llmRan, llmProvider,
+                Collections.unmodifiableList(allVariants), triggerReason);
+
+        return new SearchResponse(results, diag);
+    }
+
+    /** Apply maxChunksPerDoc diversification and limit results to {@code limit}. */
+    private List<Map<String, Object>> applyMaxChunksPerDoc(List<Map<String, Object>> merged, int limit) {
+        if (maxChunksPerDoc <= 0 || merged.isEmpty()) {
+            return merged.subList(0, Math.min(limit, merged.size()));
+        }
+        Map<String, Integer> docCounts = new LinkedHashMap<>();
+        List<Map<String, Object>> filtered = new ArrayList<>();
+        for (Map<String, Object> r : merged) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meta = (Map<String, Object>) r.get("metadata");
+            String docId = meta != null ? (String) meta.get("docId") : null;
+            String key = docId != null ? docId : UNKNOWN_DOC_KEY;
+            int count = docCounts.getOrDefault(key, 0);
+            if (count < maxChunksPerDoc) {
+                docCounts.put(key, count + 1);
+                filtered.add(r);
+                if (filtered.size() >= limit) break;
+            }
+        }
+        return filtered;
+    }
 
     private List<Map<String, Object>> retrieveVectorOnly(String question, Integer maxResults) {
         Embedding queryEmbedding = embeddingModel.embed(TextSegment.from(question)).content();
