@@ -252,8 +252,75 @@ For each query the system:
 1. Fetches `candidateK` (default 50) results from Chroma by cosine similarity.
 2. Fetches `candidateK` results from Elasticsearch by BM25 score.
 3. Assigns each result a rank within its retriever.
-4. Computes a fused RRF score: `score = Σ 1/(k + rank_i)` across both retrievers.
+4. Computes a **weighted** fused RRF score:  
+   `score = wVector * (1/(k + rankVector)) + wBm25 * (1/(k + rankBm25))`  
+   where `wVector = rag.hybrid.rrf.vectorWeight` (default 1.0) and `wBm25 = rag.hybrid.rrf.bm25Weight` (default 1.0).
 5. Sorts by fused score, applies `maxChunksPerDoc` diversification, and returns top `topK`.
+
+#### Tuning weighted RRF with environment variables
+
+To favor vector (semantic) retrieval over keyword matching, increase `vectorWeight`:
+
+```bash
+# Favor vector retrieval (2:1 vector/BM25)
+RAG_HYBRID_RRF_VECTOR_WEIGHT=2.0 RAG_HYBRID_RRF_BM25_WEIGHT=1.0 \
+  java -jar target/app.jar
+```
+
+Or in `application-local.properties`:
+
+```properties
+rag.hybrid.rrf.vectorWeight=2.0
+rag.hybrid.rrf.bm25Weight=1.0
+```
+
+#### Why fusedScore (RRF) is not suitable for the answer confidence gate
+
+The fused RRF score is a **rank-based** quantity, not a similarity measure:
+
+- Its range is roughly `0.01–0.07` for typical settings (k=60, candidateK=50).
+- It depends heavily on `k`, `candidateK`, and how many results each retriever returned.
+- Even a perfectly relevant document in the top-1 position produces a score of only
+  `1/(k+1) ≈ 0.016`, which is far below any sensible similarity-based threshold.
+
+> **Example:** With `rag.answer.minScore=0.35`, every query is refused — both
+> in-domain (`请假扣款有哪些项目`, top1 fusedScore ≈ 0.030) and out-of-domain
+> (`今天天气怎么样`, top1 fusedScore ≈ 0.016) — because the RRF scale never reaches 0.35.
+
+**Solution:** The gate is decoupled from fusion scoring.  When hybrid is active, the gate
+uses two independent, scale-stable signals: `vectorTop1Score` (cosine similarity from
+Chroma, range ≈ 0.2–0.9) and `bm25Hits` (integer count of ES hits).  Fusion still uses
+RRF for ranking, but gating does not.
+
+#### 5-run weighted RRF experiment
+
+Run the eval script five times with different weight ratios and compare `hit@10`/`MRR`
+in separate output directories:
+
+```bash
+# Run 1: equal weights (baseline)
+RAG_HYBRID_RRF_VECTOR_WEIGHT=1.0 RAG_HYBRID_RRF_BM25_WEIGHT=1.0 \
+  EVAL_OUT_DIR=eval/perf_v1b1 scripts/09_eval_csv_run_script.sh
+
+# Run 2: 2× vector weight
+RAG_HYBRID_RRF_VECTOR_WEIGHT=2.0 RAG_HYBRID_RRF_BM25_WEIGHT=1.0 \
+  EVAL_OUT_DIR=eval/perf_v2b1 scripts/09_eval_csv_run_script.sh
+
+# Run 3: 3× vector weight
+RAG_HYBRID_RRF_VECTOR_WEIGHT=3.0 RAG_HYBRID_RRF_BM25_WEIGHT=1.0 \
+  EVAL_OUT_DIR=eval/perf_v3b1 scripts/09_eval_csv_run_script.sh
+
+# Run 4: 1× vector, 2× BM25
+RAG_HYBRID_RRF_VECTOR_WEIGHT=1.0 RAG_HYBRID_RRF_BM25_WEIGHT=2.0 \
+  EVAL_OUT_DIR=eval/perf_v1b2 scripts/09_eval_csv_run_script.sh
+
+# Run 5: vector only (BM25 weight=0)
+RAG_HYBRID_RRF_VECTOR_WEIGHT=1.0 RAG_HYBRID_RRF_BM25_WEIGHT=0.0 \
+  EVAL_OUT_DIR=eval/perf_v1b0 scripts/09_eval_csv_run_script.sh
+```
+
+Compare `hit@10` and `MRR` across `eval/perf_*/` output directories to pick the best
+weight combination for your corpus.
 
 ---
 
@@ -313,7 +380,7 @@ curl "http://localhost:8090/api/rag/stats?n=20"
 | `rag.chunk.overlapChars` | `80` | `RAG_CHUNK_OVERLAP_CHARS` | Overlap chars between consecutive chunks (0 = off) |
 | `rag.topK` | `3` | `RAG_TOP_K` | Number of chunks to retrieve |
 | `rag.minScore` | `0.0` | `RAG_MIN_SCORE` | Minimum similarity score for vector retrieval |
-| `rag.answer.minScore` | `0.35` | `RAG_ANSWER_MIN_SCORE` | Confidence gate: refuse if top score < this |
+| `rag.answer.minScore` | `0.35` | `RAG_ANSWER_MIN_SCORE` | Legacy confidence gate (non-hybrid only; see hybrid gate below) |
 | `rag.rerank.enabled` | `false` | `RAG_RERANK_ENABLED` | Enable LLM-based reranking |
 | `rag.rerank.topN` | `2` | `RAG_RERANK_TOP_N` | Number of chunks to keep after rerank |
 | `rag.retrieve.maxChunksPerDoc` | `2` | `RAG_RETRIEVE_MAX_CHUNKS_PER_DOC` | Max chunks per docId (0 = disabled) |
@@ -323,6 +390,13 @@ curl "http://localhost:8090/api/rag/stats?n=20"
 | `rag.bm25.indexName` | `rag-chunks` | `RAG_BM25_INDEX_NAME` | Elasticsearch index name |
 | `rag.hybrid.candidateK` | `50` | `RAG_HYBRID_CANDIDATE_K` | Candidates per retriever before fusion |
 | `rag.hybrid.rrf.k` | `60` | `RAG_HYBRID_RRF_K` | RRF constant k |
+| `rag.hybrid.rrf.vectorWeight` | `1.0` | `RAG_HYBRID_RRF_VECTOR_WEIGHT` | RRF weight for vector retriever |
+| `rag.hybrid.rrf.bm25Weight` | `1.0` | `RAG_HYBRID_RRF_BM25_WEIGHT` | RRF weight for BM25 retriever |
+| `rag.answer.gate.enabled` | `true` | `RAG_ANSWER_GATE_ENABLED` | Enable hybrid-aware confidence gate |
+| `rag.answer.gate.vectorStrong` | `0.55` | `RAG_ANSWER_GATE_VECTOR_STRONG` | Vector cosine strong-pass threshold |
+| `rag.answer.gate.vectorWeak` | `0.30` | `RAG_ANSWER_GATE_VECTOR_WEAK` | Vector cosine weak-pass threshold (needs bm25MinHits) |
+| `rag.answer.gate.bm25MinHits` | `1` | `RAG_ANSWER_GATE_BM25_MIN_HITS` | Min BM25 hits required for weak-pass |
+| `rag.bm25.searchTopN` | `50` | `RAG_BM25_SEARCH_TOP_N` | BM25 search window for gate hit counting |
 | `rag.queryRewrite.enabled` | `false` | `RAG_QUERY_REWRITE_ENABLED` | Enable short-query rewriting |
 
 ### Chunking Strategy
@@ -360,16 +434,78 @@ rag.retrieve.maxChunksPerDoc=2
 rag.retrieve.maxChunksPerDoc=0
 ```
 
-### Answer Confidence Gate (`rag.answer.minScore`)
+### Answer Confidence Gate
 
 The confidence gate prevents the LLM from generating answers based on weakly-relevant
 context (which often leads to hallucination or unhelpful responses).
+
+#### Hybrid-aware gate (recommended when `rag.hybrid.enabled=true`)
+
+When hybrid retrieval is active the gate is **decoupled from fusedScore** and uses two
+independent, scale-stable signals:
+
+- **`vectorTop1Score`** — top-1 cosine similarity from Chroma (range ≈ 0.2–0.9).  
+  Stable across RRF parameter changes; reflects semantic relevance directly.
+- **`bm25Hits`** — number of BM25 hits returned within `rag.bm25.searchTopN` (integer).  
+  Reflects keyword evidence; robust to embedding model variation.
+
+**Gate rule:**
+
+| Condition | Decision |
+|-----------|----------|
+| `vectorTop1Score >= rag.answer.gate.vectorStrong` | ✅ PASS (strong semantic evidence) |
+| `vectorTop1Score >= rag.answer.gate.vectorWeak` AND `bm25Hits >= rag.answer.gate.bm25MinHits` | ✅ PASS (moderate semantic + keyword evidence) |
+| Neither condition met | ❌ REFUSE |
+
+**Why not use fusedScore for the gate?**  
+See [Why fusedScore (RRF) is not suitable for the answer confidence gate](#why-fusedscore-rrf-is-not-suitable-for-the-answer-confidence-gate) above.
+
+**Gate diagnostics** are included in the `/api/rag/ask` response:
+
+```json
+{
+  "question": "请假扣款有哪些项目",
+  "answer": "...",
+  "retrievedChunks": ["..."],
+  "gateDiagnostics": {
+    "gateEnabled": true,
+    "hybridGate": true,
+    "vectorTop1Score": 0.612,
+    "bm25Hits": 7,
+    "vectorStrong": 0.55,
+    "vectorWeak": 0.30,
+    "bm25MinHits": 1,
+    "pass": true,
+    "decision": "pass_vector_strong"
+  }
+}
+```
+
+**Tuning the hybrid gate:**
+
+```properties
+# application-local.properties
+# Lower vectorStrong to allow more answers through
+rag.answer.gate.vectorStrong=0.45
+# Require at least 2 BM25 hits for weak-pass
+rag.answer.gate.bm25MinHits=2
+```
+
+#### Legacy gate (`rag.answer.minScore`, non-hybrid mode only)
+
+When `rag.hybrid.enabled=false`, the gate falls back to comparing the top-chunk
+vector cosine score against `rag.answer.minScore`.
 
 | `answerMinScore` value | Effect |
 |------------------------|--------|
 | `0.0` | Gate disabled; LLM always called with retrieved context. |
 | `0.35` (default) | Queries with low retrieval confidence return a refusal message. |
 | `0.5+` | Strict gate; good for high-precision use cases. |
+
+> **Migration note:** If you previously set `rag.answer.minScore=0.35` with hybrid
+> enabled, your gate was always triggering because fusedScore ≈ 0.016–0.065 never
+> reached 0.35.  Enable the hybrid gate (`rag.answer.gate.enabled=true`, default) and
+> tune `rag.answer.gate.vectorStrong` / `rag.answer.gate.vectorWeak` instead.
 
 **Auto-calibrating the threshold:**
 Run the eval harness — it now prints score percentile distributions and recommends a
