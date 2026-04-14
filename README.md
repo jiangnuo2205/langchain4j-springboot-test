@@ -252,8 +252,19 @@ For each query the system:
 1. Fetches `candidateK` (default 50) results from Chroma by cosine similarity.
 2. Fetches `candidateK` results from Elasticsearch by BM25 score.
 3. Assigns each result a rank within its retriever.
-4. Computes a fused RRF score: `score = Σ 1/(k + rank_i)` across both retrievers.
+4. Computes a **weighted** fused RRF score:
+   `score = vectorWeight × 1/(k + rankVector) + bm25Weight × 1/(k + rankBm25)`
+   A retriever that did not return a chunk contributes 0 for its term.
 5. Sorts by fused score, applies `maxChunksPerDoc` diversification, and returns top `topK`.
+
+Both weights default to `1.0` (symmetric fusion). Increase `vectorWeight` to favour
+semantic similarity; increase `bm25Weight` to favour exact keyword matching.
+
+```bash
+# Example: vector-dominant fusion (70 % vector, 30 % BM25)
+RAG_HYBRID_RRF_VECTOR_WEIGHT=0.7 RAG_HYBRID_RRF_BM25_WEIGHT=0.3 \
+  java -jar app.jar
+```
 
 ---
 
@@ -323,6 +334,13 @@ curl "http://localhost:8090/api/rag/stats?n=20"
 | `rag.bm25.indexName` | `rag-chunks` | `RAG_BM25_INDEX_NAME` | Elasticsearch index name |
 | `rag.hybrid.candidateK` | `50` | `RAG_HYBRID_CANDIDATE_K` | Candidates per retriever before fusion |
 | `rag.hybrid.rrf.k` | `60` | `RAG_HYBRID_RRF_K` | RRF constant k |
+| `rag.hybrid.rrf.vectorWeight` | `1.0` | `RAG_HYBRID_RRF_VECTOR_WEIGHT` | Weight for vector retriever in weighted RRF |
+| `rag.hybrid.rrf.bm25Weight` | `1.0` | `RAG_HYBRID_RRF_BM25_WEIGHT` | Weight for BM25 retriever in weighted RRF |
+| `rag.answer.gate.enabled` | `true` | `RAG_ANSWER_GATE_ENABLED` | Enable hybrid answer gate (vectorTop1 + bm25Hits) |
+| `rag.answer.gate.vectorStrong` | `0.50` | `RAG_ANSWER_GATE_VECTOR_STRONG` | Cosine ≥ this → always PASS |
+| `rag.answer.gate.vectorWeak` | `0.30` | `RAG_ANSWER_GATE_VECTOR_WEAK` | Cosine ≥ this + BM25 hits ≥ minHits → PASS |
+| `rag.answer.gate.bm25MinHits` | `1` | `RAG_ANSWER_GATE_BM25_MIN_HITS` | Min BM25 hits for weak-cosine PASS |
+| `rag.answer.gate.bm25TopN` | `50` | `RAG_ANSWER_GATE_BM25_TOP_N` | BM25 results to request for gate evaluation |
 | `rag.queryRewrite.enabled` | `false` | `RAG_QUERY_REWRITE_ENABLED` | Enable short-query rewriting |
 
 ### Chunking Strategy
@@ -360,7 +378,11 @@ rag.retrieve.maxChunksPerDoc=2
 rag.retrieve.maxChunksPerDoc=0
 ```
 
-### Answer Confidence Gate (`rag.answer.minScore`)
+### Answer Confidence Gate
+
+The system uses two gate mechanisms — choose one based on your retrieval mode:
+
+#### Legacy gate (`rag.answer.minScore`) — vector-only mode
 
 The confidence gate prevents the LLM from generating answers based on weakly-relevant
 context (which often leads to hallucination or unhelpful responses).
@@ -370,6 +392,11 @@ context (which often leads to hallucination or unhelpful responses).
 | `0.0` | Gate disabled; LLM always called with retrieved context. |
 | `0.35` (default) | Queries with low retrieval confidence return a refusal message. |
 | `0.5+` | Strict gate; good for high-precision use cases. |
+
+> **Note:** `rag.answer.minScore` compares against the raw retrieval score.
+> In **vector-only** mode this is a cosine similarity (0–1 range) and `0.35` works well.
+> In **hybrid** mode the returned score is an RRF-fused rank score (~0.01–0.06 range),
+> so `0.35` will refuse **all** queries.  Use the hybrid gate below instead.
 
 **Auto-calibrating the threshold:**
 Run the eval harness — it now prints score percentile distributions and recommends a
@@ -388,6 +415,58 @@ The summary output includes:
   ℹ Recommended rag.answer.minScore ≈ 0.423
 ```
 
+#### Hybrid gate (`rag.answer.gate.*`) — hybrid retrieval mode
+
+When `rag.hybrid.enabled=true`, the hybrid gate replaces the legacy scalar gate with
+two independent, stable signals:
+
+- **`vectorTop1Score`** — cosine similarity from the vector retriever (stable 0–1 scale,
+  independent of RRF parameters).
+- **`bm25Hits`** — number of BM25 hits within `gate.bm25TopN` (stable keyword-evidence count).
+
+**Decision rule (OR logic):**
+
+```
+PASS  if  vectorTop1Score >= gate.vectorStrong
+PASS  if  vectorTop1Score >= gate.vectorWeak  AND  bm25Hits >= gate.bm25MinHits
+REFUSE otherwise
+```
+
+Intuition:
+- **Semantically strong** query (cosine ≥ `vectorStrong`): answer without needing BM25
+  support.
+- **Moderate semantic match + keyword evidence**: answer when both signals agree.
+- **Both weak**: refuse — high hallucination risk.
+
+Gate inputs and decision are logged at INFO level:
+```
+rag.ask hybridGate question='请假扣款有哪些项目'
+  vectorTop1Score=0.612 bm25Hits=7 decision=PASS reason=vectorStrong
+```
+
+The gate debug details are also returned in the `/api/rag/ask` response `debug` field:
+```json
+{
+  "gateType": "hybrid_vectorBm25",
+  "pass": true,
+  "vectorTop1Score": 0.612,
+  "bm25Hits": 7,
+  "decision": "PASS",
+  "reason": "vectorStrong",
+  "thresholds": { "vectorStrong": 0.5, "vectorWeak": 0.3, "bm25MinHits": 1 }
+}
+```
+
+**Initial threshold recommendation:**
+Run `/api/rag/search?q=<in-scope-query>` and inspect `debug.vectorTop1Score` for several
+in-scope and out-of-scope queries, then set:
+
+| Setting | Recommended starting point |
+|---------|---------------------------|
+| `vectorStrong` | p10 of in-scope `vectorTop1Score` (~0.5) |
+| `vectorWeak` | `vectorStrong - 0.20` (~0.30) |
+| `bm25MinHits` | `1` (at least one keyword hit) |
+
 ### Tuning `rag.minScore` vs Refusal Accuracy
 
 `rag.minScore` is the minimum cosine-similarity score a chunk must achieve to be included
@@ -404,6 +483,46 @@ in retrieval results.
 2. Raise `minScore` incrementally until off-topic queries return no results without dropping hit rate on valid questions.
 3. Use `rag.retrieve.maxChunksPerDoc=2` together with a moderate `minScore` (e.g. `0.3`) for the best balance between diversity and refusal accuracy.
 4. Use the eval harness to auto-calibrate `rag.answer.minScore`.
+
+### Weighted RRF Experiment Matrix
+
+To find the best vector/BM25 weight combination, run eval with multiple weight pairs and
+compare the outputs without overwriting each other.
+
+**Using `scripts/09_eval_csv_run_script.sh`:**
+
+```bash
+# Start the service with hybrid enabled, then run each combination:
+
+for combo in "1.0_0.0" "0.9_0.1" "0.7_0.3" "0.5_0.5" "0.3_0.7"; do
+  vw="${combo%_*}"
+  bw="${combo#*_}"
+  echo "=== vectorWeight=$vw bm25Weight=$bw ==="
+  RAG_HYBRID_RRF_VECTOR_WEIGHT=$vw \
+  RAG_HYBRID_RRF_BM25_WEIGHT=$bw \
+  EVAL_OUT_DIR="eval/perf_vw${vw//./}_bw${bw//./}" \
+    ./scripts/09_eval_csv_run_script.sh
+done
+```
+
+This writes separate `_report.csv` and `_topk.csv` for each combination, e.g.:
+- `eval/perf_vw10_bw00_report.csv`
+- `eval/perf_vw07_bw03_report.csv`
+- …
+
+Compare hit@10, MRR, and refusal_acc across combinations to pick the optimal weights.
+
+**Quick single-run override (without editing config files):**
+
+```bash
+# Restart the service with different weights, then run eval:
+RAG_HYBRID_ENABLED=true \
+RAG_HYBRID_RRF_VECTOR_WEIGHT=0.7 \
+RAG_HYBRID_RRF_BM25_WEIGHT=0.3 \
+  mvn spring-boot:run &
+
+EVAL_OUT_DIR=eval/perf_vw07_bw03 ./scripts/09_eval_csv_run_script.sh
+```
 
 ### LLM Rerank
 

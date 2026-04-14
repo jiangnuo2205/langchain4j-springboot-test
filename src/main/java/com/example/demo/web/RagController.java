@@ -33,8 +33,8 @@ public class RagController {
     @PostMapping("/ask")
     public RagAskResponse ask(@Valid @RequestBody RagAskRequest req) {
         List<String> chunks = ragService.retrieve(req.question());
-        String answer = ragService.ask(req.question());
-        return new RagAskResponse(req.question(), answer, chunks);
+        RagService.AskResult askResult = ragService.ask(req.question());
+        return new RagAskResponse(req.question(), askResult.answer(), chunks, askResult.gateDebug());
     }
 
     /**

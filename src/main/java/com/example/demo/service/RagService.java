@@ -62,9 +62,18 @@ public class RagService {
     private final boolean hybridEnabled;
     private final int hybridRrfK;
     private final int hybridCandidateK;
+    private final double hybridRrfVectorWeight;
+    private final double hybridRrfBm25Weight;
 
-    // Confidence gate for answer refusal
+    // Confidence gate for answer refusal (legacy scalar gate)
     private final double answerMinScore;
+
+    // Hybrid answer confidence gate (vectorTop1Score + bm25Hits)
+    private final boolean gateEnabled;
+    private final double gateVectorStrong;
+    private final double gateVectorWeak;
+    private final int gateBm25MinHits;
+    private final int gateBm25TopN;
 
     /** Optional BM25 service; null when rag.bm25.enabled=false. */
     @Autowired(required = false)
@@ -91,6 +100,23 @@ public class RagService {
     // Count of chunks currently in the store (may include persisted data for Chroma)
     private volatile int indexedCount = 0;
 
+    /**
+     * Result of the answer confidence gate evaluation.
+     *
+     * @param pass            {@code true} if the gate allows the LLM to answer
+     * @param vectorTop1Score cosine similarity score from the vector retriever (top-1)
+     * @param bm25Hits        number of BM25 hits returned within {@code gateBm25TopN}
+     * @param decision        human-readable decision string ("PASS" or "REFUSE")
+     * @param reason          reason code for the decision
+     */
+    public record GateResult(
+            boolean pass,
+            double vectorTop1Score,
+            int bm25Hits,
+            String decision,
+            String reason
+    ) {}
+
     public RagService(
             EmbeddingModel embeddingModel,
             ChatModel chatModel,
@@ -112,7 +138,14 @@ public class RagService {
             @Value("${rag.hybrid.enabled:false}") boolean hybridEnabled,
             @Value("${rag.hybrid.rrf.k:60}") int hybridRrfK,
             @Value("${rag.hybrid.candidateK:50}") int hybridCandidateK,
-            @Value("${rag.answer.minScore:0.35}") double answerMinScore
+            @Value("${rag.hybrid.rrf.vectorWeight:1.0}") double hybridRrfVectorWeight,
+            @Value("${rag.hybrid.rrf.bm25Weight:1.0}") double hybridRrfBm25Weight,
+            @Value("${rag.answer.minScore:0.35}") double answerMinScore,
+            @Value("${rag.answer.gate.enabled:true}") boolean gateEnabled,
+            @Value("${rag.answer.gate.vectorStrong:0.50}") double gateVectorStrong,
+            @Value("${rag.answer.gate.vectorWeak:0.30}") double gateVectorWeak,
+            @Value("${rag.answer.gate.bm25MinHits:1}") int gateBm25MinHits,
+            @Value("${rag.answer.gate.bm25TopN:50}") int gateBm25TopN
 
     ) {
         this.embeddingModel = embeddingModel;
@@ -135,13 +168,24 @@ public class RagService {
         this.hybridEnabled = hybridEnabled;
         this.hybridRrfK = hybridRrfK;
         this.hybridCandidateK = Math.min(hybridCandidateK, 50);
+        this.hybridRrfVectorWeight = hybridRrfVectorWeight;
+        this.hybridRrfBm25Weight = hybridRrfBm25Weight;
         this.answerMinScore = answerMinScore;
+        this.gateEnabled = gateEnabled;
+        this.gateVectorStrong = gateVectorStrong;
+        this.gateVectorWeak = gateVectorWeak;
+        this.gateBm25MinHits = gateBm25MinHits;
+        this.gateBm25TopN = gateBm25TopN;
     }
 
     @PostConstruct
     void logConfig() {
-        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={} hybridEnabled={} answerMinScore={}",
-                vectorStore, embeddingProvider, llmProvider, docsDir, hybridEnabled, answerMinScore);
+        log.info("rag.config vectorStore={} embeddingProvider={} llmProvider={} docsDir={} hybridEnabled={} "
+                        + "rrfVectorWeight={} rrfBm25Weight={} gateEnabled={} gateVectorStrong={} gateVectorWeak={} "
+                        + "gateBm25MinHits={} answerMinScore={}",
+                vectorStore, embeddingProvider, llmProvider, docsDir, hybridEnabled,
+                hybridRrfVectorWeight, hybridRrfBm25Weight,
+                gateEnabled, gateVectorStrong, gateVectorWeak, gateBm25MinHits, answerMinScore);
     }
 
     /** Stats: index state summary for observability without heap dumps. */
@@ -181,6 +225,12 @@ public class RagService {
         result.put("bm25Available", bm25IndexService != null);
         result.put("chunkOverlapChars", chunkOverlapChars);
         result.put("answerMinScore", answerMinScore);
+        result.put("hybridRrfVectorWeight", hybridRrfVectorWeight);
+        result.put("hybridRrfBm25Weight", hybridRrfBm25Weight);
+        result.put("gateEnabled", gateEnabled);
+        result.put("gateVectorStrong", gateVectorStrong);
+        result.put("gateVectorWeak", gateVectorWeak);
+        result.put("gateBm25MinHits", gateBm25MinHits);
         return result;
     }
 
@@ -663,11 +713,13 @@ public class RagService {
 
     /**
      * Hybrid retrieval: combines vector (Chroma) and BM25 (Elasticsearch) candidates
-     * using Reciprocal Rank Fusion (RRF).
+     * using Weighted Reciprocal Rank Fusion (RRF).
      *
-     * <p>RRF score formula per document: {@code sum_over_rankers( 1 / (k + rank) )}
+     * <p>Weighted RRF score formula per document:
+     * {@code score = vectorWeight * 1/(k + rankVector) + bm25Weight * 1/(k + rankBm25)}
      * where {@code k = rag.hybrid.rrf.k} (default 60) dampens the influence of
-     * highly-ranked documents.
+     * highly-ranked documents.  A retriever that did not return a chunk contributes
+     * 0 for that term.  Weights default to 1.0 (symmetric / unweighted).
      *
      * @param question   the query text
      * @param maxResults override for topK (null = use configured topK)
@@ -676,6 +728,8 @@ public class RagService {
         int limit = maxResults != null ? maxResults : topK;
         int candidateK = hybridCandidateK;
         int k = hybridRrfK;
+        double vw = hybridRrfVectorWeight;
+        double bw = hybridRrfBm25Weight;
 
         // ── 1. Vector candidates ───────────────────────────────────────────────
         List<Map<String, Object>> vectorResults = retrieveVectorOnly(question, candidateK);
@@ -689,27 +743,27 @@ public class RagService {
             return vectorResults.subList(0, Math.min(limit, vectorResults.size()));
         }
 
-        // ── 3. RRF fusion ──────────────────────────────────────────────────────
-        // Map: sourceId -> accumulated RRF score
+        // ── 3. Weighted RRF fusion ─────────────────────────────────────────────
+        // Map: sourceId -> accumulated weighted RRF score
         Map<String, Double> rrfScores = new LinkedHashMap<>();
         // Map: sourceId -> result data (from whichever retriever saw it first)
         Map<String, Map<String, Object>> docData = new LinkedHashMap<>();
 
-        // Score from vector ranking
+        // Score from vector ranking (weighted)
         for (int i = 0; i < vectorResults.size(); i++) {
             Map<String, Object> r = vectorResults.get(i);
             String sourceId = (String) r.get("sourceId");
             if (sourceId == null) continue;
-            double rrf = 1.0 / (k + i + 1);
+            double rrf = vw * (1.0 / (k + i + 1));
             rrfScores.merge(sourceId, rrf, Double::sum);
             docData.putIfAbsent(sourceId, r);
         }
 
-        // Score from BM25 ranking
+        // Score from BM25 ranking (weighted)
         for (int i = 0; i < bm25Results.size(); i++) {
             Bm25IndexService.BM25Hit hit = bm25Results.get(i);
             String chunkId = hit.chunkId();
-            double rrf = 1.0 / (k + i + 1);
+            double rrf = bw * (1.0 / (k + i + 1));
             rrfScores.merge(chunkId, rrf, Double::sum);
             if (!docData.containsKey(chunkId)) {
                 // Build a result map from the BM25 hit (chunk was not in vector results)
@@ -731,8 +785,8 @@ public class RagService {
             merged.add(r);
         }
 
-        log.debug("rag.hybrid vectorCandidates={} bm25Candidates={} merged={} limit={}",
-                vectorResults.size(), bm25Results.size(), merged.size(), limit);
+        log.debug("rag.hybrid vectorCandidates={} bm25Candidates={} merged={} limit={} vw={} bw={}",
+                vectorResults.size(), bm25Results.size(), merged.size(), limit, vw, bw);
 
         // ── 6. Apply maxChunksPerDoc diversification ───────────────────────────
         if (maxChunksPerDoc > 0 && !merged.isEmpty()) {
@@ -781,34 +835,134 @@ public class RagService {
     /**
      * Retrieve relevant chunks and answer the question using the chat model.
      * <p>
-     * Applies a confidence gate: if retrieval returns no results or the top chunk
-     * score is below {@code rag.answer.minScore}, a refusal message is returned
-     * instead of calling the LLM with low-quality context.
+     * When {@code rag.answer.gate.enabled=true} and hybrid retrieval is active, uses the
+     * engineering-correct gate based on {@code vectorTop1Score} and {@code bm25Hits} rather
+     * than the legacy RRF-score gate.  Falls back to the legacy {@code answerMinScore} gate
+     * when hybrid is disabled or gate is explicitly disabled.
      * <p>
      * Optionally applies LLM-based reranking when rag.rerank.enabled=true.
+     *
+     * @return an {@link AskResult} containing the answer string and gate debug info
      */
-    public String ask(String question) {
+    public AskResult ask(String question) {
         List<Map<String, Object>> results = retrieveWithScores(question);
 
         if (results.isEmpty()) {
-            log.info("rag.ask confidence gate: no retrieval results question='{}'", question);
-            return "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。\n\n"
+            log.info("rag.ask gate: no retrieval results question='{}'", question);
+            String refusal = "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。\n\n"
                     + "Sorry, no relevant content was found in the knowledge base for your question. "
                     + "Please try rephrasing or check whether the topic is covered.";
+            Map<String, Object> gateDbg = new LinkedHashMap<>();
+            gateDbg.put("gateType", "no_results");
+            gateDbg.put("pass", false);
+            return new AskResult(refusal, gateDbg);
         }
 
+        // ── Gate evaluation ────────────────────────────────────────────────────
+        // Use the hybrid gate (vectorTop1Score + bm25Hits) when both hybrid retrieval
+        // and the gate feature are enabled; otherwise fall back to the legacy scalar gate.
+        if (hybridEnabled && bm25IndexService != null && gateEnabled) {
+            GateResult gate = evaluateHybridGate(question);
+            log.info("rag.ask hybridGate question='{}' vectorTop1Score={} bm25Hits={} decision={} reason={}",
+                    question, gate.vectorTop1Score(), gate.bm25Hits(), gate.decision(), gate.reason());
+            if (!gate.pass()) {
+                String refusal = String.format(
+                        "抱歉，我没有找到足够可信的相关内容来回答您的问题"
+                                + "（向量相似度 %.3f，BM25命中 %d，阈值 strong=%.2f weak=%.2f minHits=%d）。"
+                                + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
+                                + "Sorry, retrieval confidence is insufficient to answer "
+                                + "(vectorTop1=%.3f, bm25Hits=%d). "
+                                + "Please rephrase your question or check if the topic is in scope.",
+                        gate.vectorTop1Score(), gate.bm25Hits(),
+                        gateVectorStrong, gateVectorWeak, gateBm25MinHits,
+                        gate.vectorTop1Score(), gate.bm25Hits());
+                Map<String, Object> gateDbg = buildGateDebugMap(gate);
+                return new AskResult(refusal, gateDbg);
+            }
+            Map<String, Object> gateDbg = buildGateDebugMap(gate);
+            String answer = generateAnswer(question, results);
+            return new AskResult(answer, gateDbg);
+        }
+
+        // ── Legacy scalar gate (non-hybrid or gate explicitly disabled) ────────
         double topScore = (double) results.get(0).get("score");
+        Map<String, Object> legacyGateDbg = new LinkedHashMap<>();
+        legacyGateDbg.put("gateType", "legacy_minScore");
+        legacyGateDbg.put("topScore", topScore);
+        legacyGateDbg.put("answerMinScore", answerMinScore);
         if (answerMinScore > 0.0 && topScore < answerMinScore) {
             log.info("rag.ask confidence gate triggered topScore={} answerMinScore={} question='{}'",
                     topScore, answerMinScore, question);
-            return String.format(
+            legacyGateDbg.put("pass", false);
+            String refusal = String.format(
                     "抱歉，我没有找到足够可信的相关内容来回答您的问题（最高相关度 %.3f，阈值 %.3f）。"
                             + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。\n\n"
                             + "Sorry, the retrieved content confidence (%.3f) is below the required threshold (%.3f). "
                             + "Please rephrase your question or check if the topic is in scope.",
                     topScore, answerMinScore, topScore, answerMinScore);
+            return new AskResult(refusal, legacyGateDbg);
+        }
+        legacyGateDbg.put("pass", true);
+        String answer = generateAnswer(question, results);
+        return new AskResult(answer, legacyGateDbg);
+    }
+
+    /**
+     * Evaluate the hybrid answer confidence gate using independent signals:
+     * vector top-1 cosine score and BM25 hit count.
+     *
+     * <p>PASS rule (OR logic):
+     * <ul>
+     *   <li>vectorTop1Score &ge; gateVectorStrong, OR</li>
+     *   <li>vectorTop1Score &ge; gateVectorWeak AND bm25Hits &ge; gateBm25MinHits</li>
+     * </ul>
+     */
+    public GateResult evaluateHybridGate(String question) {
+        // Get vector top-1 cosine score (independent of RRF scaling)
+        List<Map<String, Object>> vectorTop = retrieveVectorOnly(question, 1);
+        double vectorTop1Score = vectorTop.isEmpty() ? 0.0
+                : ((Number) vectorTop.get(0).get("score")).doubleValue();
+
+        // Count BM25 hits within gateBm25TopN
+        int bm25Hits = 0;
+        if (bm25IndexService != null) {
+            try {
+                bm25Hits = bm25IndexService.search(question, gateBm25TopN).size();
+            } catch (Exception e) {
+                log.warn("rag.gate bm25 search failed err={}", e.getMessage());
+            }
         }
 
+        // Gate rule
+        if (vectorTop1Score >= gateVectorStrong) {
+            return new GateResult(true, vectorTop1Score, bm25Hits, "PASS", "vectorStrong");
+        }
+        if (vectorTop1Score >= gateVectorWeak && bm25Hits >= gateBm25MinHits) {
+            return new GateResult(true, vectorTop1Score, bm25Hits, "PASS", "vectorWeak+bm25");
+        }
+        return new GateResult(false, vectorTop1Score, bm25Hits, "REFUSE",
+                String.format("vectorTop1=%.4f < weak=%.2f or bm25Hits=%d < minHits=%d",
+                        vectorTop1Score, gateVectorWeak, bm25Hits, gateBm25MinHits));
+    }
+
+    private Map<String, Object> buildGateDebugMap(GateResult gate) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("gateType", "hybrid_vectorBm25");
+        m.put("pass", gate.pass());
+        m.put("vectorTop1Score", gate.vectorTop1Score());
+        m.put("bm25Hits", gate.bm25Hits());
+        m.put("decision", gate.decision());
+        m.put("reason", gate.reason());
+        m.put("thresholds", Map.of(
+                "vectorStrong", gateVectorStrong,
+                "vectorWeak", gateVectorWeak,
+                "bm25MinHits", gateBm25MinHits
+        ));
+        return m;
+    }
+
+    /** Generate the LLM answer from retrieved context (shared by both gate paths). */
+    private String generateAnswer(String question, List<Map<String, Object>> results) {
         List<Map<String, Object>> contextResults = rerankEnabled
                 ? rerank(question, results)
                 : results;
@@ -827,6 +981,14 @@ public class RagService {
 
         return chatModel.chat(prompt);
     }
+
+    /**
+     * Result of an {@link #ask} call.
+     *
+     * @param answer    the LLM answer, or a refusal message if the gate rejected
+     * @param gateDebug gate evaluation details for observability / debugging
+     */
+    public record AskResult(String answer, Map<String, Object> gateDebug) {}
 
     /**
      * LLM-based reranking: ask chat model to select the most relevant chunk IDs.
