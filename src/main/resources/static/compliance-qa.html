@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>医药公司 · 合规智能问答</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f7f8fa;
+            --card-bg: #ffffff;
+            --border: #e5e7eb;
+            --text: #1a1a2e;
+            --text-secondary: #6b7280;
+            --primary: #1e40af;
+            --primary-light: #dbeafe;
+            --primary-dark: #1e3a8a;
+            --accent: #059669;
+            --accent-light: #d1fae5;
+            --warning: #d97706;
+            --warning-light: #fef3c7;
+            --danger: #dc2626;
+            --danger-light: #fee2e2;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+            --radius: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Header ─────────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #2563eb 100%);
+            color: white;
+            padding: 20px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(30,64,175,0.3);
+        }
+        .header-inner {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .header .subtitle {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-top: 2px;
+            font-weight: 300;
+        }
+        .header-badge {
+            font-size: 11px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.25);
+            padding: 4px 10px;
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+        }
+
+        /* ── Main Container ─────────────────────────────── */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* ── Settings Row ───────────────────────────────── */
+        .settings-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .settings-row label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .settings-row input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 13px;
+            background: var(--card-bg);
+            max-width: 280px;
+        }
+        .btn-reindex {
+            padding: 8px 16px;
+            border: 1px solid var(--primary);
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+        .btn-reindex:hover { background: var(--primary); color: white; }
+        .btn-reindex:disabled { opacity: 0.5; cursor: not-allowed; }
+        .reindex-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* ── Question Input ─────────────────────────────── */
+        .question-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+        .question-card textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 12px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: 8px;
+            font-size: 15px;
+            font-family: inherit;
+            resize: vertical;
+            background: var(--bg);
+            transition: border-color 0.15s;
+            line-height: 1.6;
+        }
+        .question-card textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(30,64,175,0.1);
+        }
+        .question-card textarea::placeholder { color: #b0b8c4; }
+        .question-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .btn-ask {
+            padding: 10px 28px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .btn-ask:hover { background: var(--primary-dark); box-shadow: var(--shadow-lg); }
+        .btn-ask:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ask-status { font-size: 12px; color: var(--text-secondary); }
+        .ask-status.error { color: var(--danger); }
+
+        .quick-questions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .quick-q {
+            font-size: 12px;
+            padding: 5px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.15s;
+        }
+        .quick-q:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+
+        /* ── Answer Section ─────────────────────────────── */
+        .answer-section {
+            display: none;
+        }
+        .answer-section.visible { display: block; }
+
+        /* Confidence Bar */
+        .confidence-bar {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .confidence-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .confidence-track {
+            flex: 1;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+        .confidence-fill.high { background: var(--accent); }
+        .confidence-fill.medium { background: var(--warning); }
+        .confidence-fill.low { background: var(--danger); }
+        .confidence-value {
+            font-size: 14px;
+            font-weight: 700;
+            min-width: 48px;
+            text-align: right;
+        }
+        .confidence-value.high { color: var(--accent); }
+        .confidence-value.medium { color: var(--warning); }
+        .confidence-value.low { color: var(--danger); }
+
+        /* Answer Card */
+        .answer-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            margin-bottom: 16px;
+        }
+        .answer-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .answer-card-header .icon { font-size: 18px; }
+        .answer-card-header h3 { font-size: 14px; font-weight: 600; }
+        .answer-card-header .badge-below {
+            margin-left: auto;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            background: var(--warning-light);
+            color: var(--warning);
+            font-weight: 500;
+        }
+        .answer-content {
+            font-size: 15px;
+            line-height: 1.8;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        /* 高亮答案中的引用标记 [1] [2] */
+        .ref-tag {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--primary);
+            background: var(--primary-light);
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin: 0 1px;
+            cursor: pointer;
+            vertical-align: baseline;
+            transition: all 0.15s;
+        }
+        .ref-tag:hover { background: var(--primary); color: white; }
+
+        /* Sources Card */
+        .sources-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+        .sources-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .source-item {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            transition: all 0.15s;
+            background: var(--bg);
+        }
+        .source-item:last-child { margin-bottom: 0; }
+        .source-item:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+        .source-item-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .source-ref-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            background: var(--primary);
+            color: white;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .source-doc-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+            flex: 1;
+        }
+        .source-score {
+            font-size: 12px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 12px;
+        }
+        .source-score.high { background: var(--accent-light); color: var(--accent); }
+        .source-score.medium { background: var(--warning-light); color: var(--warning); }
+        .source-score.low { background: var(--danger-light); color: var(--danger); }
+        .source-chunk-info {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .source-preview {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            background: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            border: 1px solid #f0f0f0;
+        }
+
+        /* ── Loading ────────────────────────────────────── */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px; height: 16px;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Empty State ────────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+        .empty-state p { font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-inner">
+        <div>
+            <h1>生物医药 · 合规智能问答</h1>
+            <div class="subtitle">GxP法规 / SOP手册 / 内部合规制度</div>
+        </div>
+        <div class="header-badge">原型 v1.0</div>
+    </div>
+</div>
+
+<div class="container">
+    <!-- Settings -->
+    <div class="settings-row">
+        <label>后端地址</label>
+        <input id="baseUrl" value="http://localhost:8090" />
+        <button class="btn-reindex" id="reindexBtn">重建索引</button>
+        <span class="reindex-status" id="reindexStatus"></span>
+    </div>
+
+    <!-- Question Input -->
+    <div class="question-card">
+        <textarea id="questionInput" placeholder="请输入您的合规问题，例如：ALCOA+原则的具体要求是什么？"></textarea>
+        <div class="question-actions">
+            <button class="btn-ask" id="askBtn">提交问题</button>
+            <span class="ask-status" id="askStatus"></span>
+        </div>
+        <div class="quick-questions">
+            <span class="quick-q" data-q="ALCOA+原则的具体要求是什么？">ALCOA+原则</span>
+            <span class="quick-q" data-q="数据备份频率的要求是什么？不同文档之间是否存在冲突？">数据备份要求</span>
+            <span class="quick-q" data-q="CAPA必须在多少天内关闭？">CAPA关闭时限</span>
+            <span class="quick-q" data-q="文档变更流程是怎样的？审批周期是多久？">文档变更流程</span>
+            <span class="quick-q" data-q="实验室原始数据录入LIMS的时限要求是多少小时？">LIMS录入时限</span>
+            <span class="quick-q" data-q="新SOP发布后培训要求是什么？">SOP培训要求</span>
+        </div>
+    </div>
+
+    <!-- Answer Section -->
+    <div class="answer-section" id="answerSection">
+        <!-- Confidence Bar -->
+        <div class="confidence-bar" id="confidenceBar">
+            <span class="confidence-label">检索置信度</span>
+            <div class="confidence-track">
+                <div class="confidence-fill" id="confidenceFill"></div>
+            </div>
+            <span class="confidence-value" id="confidenceValue">--</span>
+        </div>
+
+        <!-- Answer -->
+        <div class="answer-card">
+            <div class="answer-card-header">
+                <span class="icon">💡</span>
+                <h3>回答</h3>
+                <span class="badge-below" id="belowBadge" style="display:none;">置信度不足</span>
+            </div>
+            <div class="answer-content" id="answerContent"></div>
+        </div>
+
+        <!-- Sources -->
+        <div class="sources-card">
+            <h3><span>📄</span> 引用来源</h3>
+            <div id="sourcesList"></div>
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState">
+        <div class="icon">🔍</div>
+        <p>请在上方输入合规相关问题，系统将从知识库中检索并给出带引用来源的答案</p>
+    </div>
+</div>
+
+<script>
+    const $ = (id) => document.getElementById(id);
+
+    function getBaseUrl() {
+        return $("baseUrl").value.trim().replace(/\/+$/, "");
+    }
+
+    // ── Quick questions ──────────────────────────────────────
+    document.querySelectorAll(".quick-q").forEach(el => {
+        el.addEventListener("click", () => {
+            $("questionInput").value = el.dataset.q;
+            $("askBtn").click();
+        });
+    });
+
+    // Ctrl/Cmd+Enter to submit
+    $("questionInput").addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            $("askBtn").click();
+        }
+    });
+
+    // ── Reindex ──────────────────────────────────────────────
+    $("reindexBtn").addEventListener("click", async () => {
+        $("reindexBtn").disabled = true;
+        $("reindexStatus").textContent = "重建索引中…";
+        try {
+            const res = await fetch(getBaseUrl() + "/api/rag/reindex", { method: "POST" });
+            const json = await res.json();
+            $("reindexStatus").textContent = "✓ 索引完成，共 " + (json.chunksIndexed ?? JSON.stringify(json)) + " 个文档块";
+        } catch (e) {
+            $("reindexStatus").textContent = "✗ 重建失败：" + e;
+        } finally {
+            $("reindexBtn").disabled = false;
+        }
+    });
+
+    // ── Ask ──────────────────────────────────────────────────
+    $("askBtn").addEventListener("click", async () => {
+        const question = $("questionInput").value.trim();
+        if (!question) {
+            setAskStatus("请输入问题", true);
+            return;
+        }
+
+        $("askBtn").disabled = true;
+        setAskStatus("正在检索知识库并生成回答…");
+        $("emptyState").style.display = "none";
+        $("answerSection").classList.remove("visible");
+
+        try {
+            const res = await fetch(getBaseUrl() + "/api/rag/ask", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question })
+            });
+
+            const text = await res.text();
+            if (!res.ok) {
+                setAskStatus("请求失败：HTTP " + res.status, true);
+                return;
+            }
+
+            const json = JSON.parse(text);
+            renderAnswer(json);
+            setAskStatus("完成");
+        } catch (e) {
+            setAskStatus("请求异常：" + e, true);
+        } finally {
+            $("askBtn").disabled = false;
+        }
+    });
+
+    function setAskStatus(msg, isError) {
+        const el = $("askStatus");
+        el.textContent = msg;
+        el.className = "ask-status" + (isError ? " error" : "");
+    }
+
+    // ── Render Answer ────────────────────────────────────────
+    function renderAnswer(data) {
+        // data: { question, answer, sources[], topScore, belowThreshold }
+
+        // 1. Confidence bar
+        const pct = Math.round((data.topScore || 0) * 100);
+        const level = pct >= 70 ? "high" : pct >= 40 ? "medium" : "low";
+
+        $("confidenceFill").style.width = pct + "%";
+        $("confidenceFill").className = "confidence-fill " + level;
+        $("confidenceValue").textContent = pct + "%";
+        $("confidenceValue").className = "confidence-value " + level;
+
+        // 2. Below threshold badge
+        $("belowBadge").style.display = data.belowThreshold ? "inline-block" : "none";
+
+        // 3. Answer text — highlight [1] [2] references
+        const answerHtml = escapeHtml(data.answer || "")
+            .replace(/\[(\d+)\]/g, '<span class="ref-tag" onclick="scrollToSource($1)">[$1]</span>');
+        $("answerContent").innerHTML = answerHtml;
+
+        // 4. Sources list
+        const sources = data.sources || [];
+        if (sources.length === 0) {
+            $("sourcesList").innerHTML = '<div style="color:#999;font-size:13px;">无引用来源</div>';
+        } else {
+            $("sourcesList").innerHTML = sources.map((s, i) => {
+                const scoreVal = Math.round((s.score || 0) * 100);
+                const sLevel = scoreVal >= 70 ? "high" : scoreVal >= 40 ? "medium" : "low";
+                // 从 docId 提取友好名称：去掉 .txt/.md 后缀
+                const friendlyName = (s.docId || "未知文档").replace(/\.(txt|md)$/, "");
+                return `
+                    <div class="source-item" id="source-${s.refIndex || (i+1)}">
+                        <div class="source-item-header">
+                            <span class="source-ref-badge">${s.refIndex || (i+1)}</span>
+                            <span class="source-doc-name">${escapeHtml(friendlyName)}</span>
+                            <span class="source-score ${sLevel}">${scoreVal}%</span>
+                        </div>
+                        <div class="source-chunk-info">块编号：${escapeHtml(s.chunkIndex || "-")}</div>
+                        <div class="source-preview">${escapeHtml(s.textPreview || "（无预览）")}</div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        // Show section
+        $("answerSection").classList.add("visible");
+    }
+
+    function scrollToSource(n) {
+        const el = document.getElementById("source-" + n);
+        if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.style.borderColor = "var(--primary)";
+            el.style.boxShadow = "0 0 0 3px rgba(30,64,175,0.15)";
+            setTimeout(() => {
+                el.style.borderColor = "";
+                el.style.boxShadow = "";
+            }, 2000);
+        }
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str;
+        return div.innerHTML;
+    }
+</script>
+</body>
+</html>

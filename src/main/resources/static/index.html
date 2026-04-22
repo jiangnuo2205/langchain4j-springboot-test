@@ -126,7 +126,7 @@
         <label>召回的文档块</label>
         <pre id="ragChunks">（等待请求...）</pre>
         <div class="hint">
-            说明：POST <code>/api/rag/reindex</code> 建立索引，POST <code>/api/rag/ask</code> 检索 topK 块并用 LLM 生成答案。
+            说明：POST <code>/api/rag/reindex</code> 建立索引，POST <code>/api/rag/ask1</code> 检索 topK 块并用 LLM 生成答案。
         </div>
     </div>
 </div>
@@ -359,7 +359,7 @@
         $("ragChunks").textContent = "";
 
         try {
-            const res = await fetch(getBaseUrl() + "/api/rag/ask", {
+            const res = await fetch(getBaseUrl() + "/api/rag/ask1", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question })

@@ -87,6 +87,22 @@ public class RagService {
             long estimatedTextBytesUtf8
     ) {}
 
+    /** 单条引用来源 */
+    public record SourceRef(
+            String docId,          // 文件名，如 "doc1-GxP数据完整性规范.txt"
+            String chunkIndex,     // 块编号
+            double score,          // 检索相关度
+            String textPreview     // 前200字摘要
+    ) {}
+
+    /** ask() 的结构化返回 */
+    public record RagAskResult(
+            String answer,            // LLM 生成的带引用标记的回答
+            List<SourceRef> sources,  // 引用来源列表，顺序对应 [1] [2] ...
+            double topScore,          // 最高相关度（用于前端展示置信度）
+            boolean belowThreshold    // 是否低于置信度阈值（被拒绝回答）
+    ) {}
+
     private volatile List<IndexedChunkMeta> indexedMetas = List.of();
     // Count of chunks currently in the store (may include persisted data for Chroma)
     private volatile int indexedCount = 0;
@@ -787,7 +803,8 @@ public class RagService {
      * <p>
      * Optionally applies LLM-based reranking when rag.rerank.enabled=true.
      */
-    public String ask(String question) {
+    //todo 原始不变
+    public String ask1(String question) {
         List<Map<String, Object>> results = retrieveWithScores(question);
 
         if (results.isEmpty()) {
@@ -827,6 +844,136 @@ public class RagService {
 
         return chatModel.chat(prompt);
     }
+
+    /**
+     * Retrieve relevant chunks and answer the question using the chat model.
+     * Returns structured result with answer + citation sources.
+     * <p>
+     * Applies a confidence gate: if retrieval returns no results or the top chunk
+     * score is below {@code rag.answer.minScore}, a refusal message is returned
+     * instead of calling the LLM with low-quality context.
+     * <p>
+     * Optionally applies LLM-based reranking when rag.rerank.enabled=true.
+     */
+    public RagAskResult ask(String question) {
+        List<Map<String, Object>> results = retrieveWithScores(question);
+
+        // ── 无结果 ──────────────────────────────────────────────────────────
+        if (results.isEmpty()) {
+            log.info("rag.ask confidence gate: no retrieval results question='{}'", question);
+            return new RagAskResult(
+                    "抱歉，我在知识库中没有找到与您问题相关的内容。请尝试换个方式提问，或确认该问题是否在知识库范围内。",
+                    List.of(), 0.0, true);
+        }
+
+        // ── 置信度不足 ──────────────────────────────────────────────────────
+        double topScore = (double) results.get(0).get("score");
+        if (answerMinScore > 0.0 && topScore < answerMinScore) {
+            log.info("rag.ask confidence gate triggered topScore={} answerMinScore={} question='{}'",
+                    topScore, answerMinScore, question);
+
+            // 仍然返回 sources，让前端能展示"虽然置信度低但找到了这些"
+            List<SourceRef> sources = buildSourceRefs(results);
+            String refusal = String.format(
+                    "抱歉，我没有找到足够可信的相关内容来回答您的问题（最高相关度 %.1f%%，阈值 %.1f%%）。"
+                            + "建议您换一种表达方式，或者这个问题可能超出了知识库的范围。",
+                    topScore * 100, answerMinScore * 100);
+            return new RagAskResult(refusal, sources, topScore, true);
+        }
+
+        // ── 正常回答流程 ────────────────────────────────────────────────────
+        List<Map<String, Object>> contextResults = rerankEnabled
+                ? rerank(question, results)
+                : results;
+
+        // 构建带来源标注的 context
+        StringBuilder context = new StringBuilder();
+        for (int i = 0; i < contextResults.size(); i++) {
+            Map<String, Object> r = contextResults.get(i);
+            String text = (String) r.get("text");
+            String docId = extractDocId(r);
+            if (text != null) {
+                context.append("[").append(i + 1).append("]")
+                        .append("（来源：").append(docId != null ? docId : "未知文档").append("）\n")
+                        .append(text).append("\n\n");
+            }
+        }
+
+        // 改写后的 Prompt：中文、要求引用、要求冲突检测
+        String prompt = buildRagPrompt(question, context.toString());
+
+        long start = System.nanoTime();
+        String answer = chatModel.chat(prompt);
+        long costMs = java.time.Duration.ofNanos(System.nanoTime() - start).toMillis();
+//        log.info("rag.ask llm costMs={} question='{}' contextChunks={} answerLen={}",
+//                costMs, question, contextResults.size(), safeLen(answer));
+
+        log.info("rag.ask llm costMs={} question='{}' contextChunks={} ",
+                costMs, question, contextResults.size());
+
+        List<SourceRef> sources = buildSourceRefs(contextResults);
+        return new RagAskResult(answer, sources, topScore, false);
+    }
+
+    /**
+     * Build the RAG prompt with citation and conflict-detection instructions.
+     */
+    private String buildRagPrompt(String question, String context) {
+        return """
+                你是xx公式的绩效分析智能助手。请严格根据以下参考资料回答问题。
+
+                ## 回答要求：
+                1. **必须基于参考资料**：只使用提供的资料回答，不要编造或引用外部知识
+                2. **标注引用来源**：在回答中用 [1] [2] 等编号标注你引用了哪条资料
+                3. **冲突检测**：如果不同资料之间存在矛盾或冲突，请明确指出：
+                   - 说明哪些内容存在冲突
+                   - 指出各自来源
+                   - 建议以正式法规/SOP为准，内部通知如有冲突需特别注意
+                4. **不确定性说明**：如果资料不足以完整回答问题，请明确说明哪些部分无法确认
+                5. 使用中文回答，语言专业但易懂
+
+                ## 参考资料：
+                %s
+                ## 问题：%s
+                """.formatted(context, question);
+    }
+
+    /**
+     * Extract docId from a result map (handles nested metadata).
+     */
+    private String extractDocId(Map<String, Object> result) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> meta = (Map<String, Object>) result.get("metadata");
+        if (meta != null) {
+            String docId = (String) meta.get("docId");
+            if (docId != null) return docId;
+        }
+        return null;
+    }
+
+    /**
+     * Build source reference list from context results.
+     */
+    private List<SourceRef> buildSourceRefs(List<Map<String, Object>> contextResults) {
+        List<SourceRef> sources = new ArrayList<>();
+        for (Map<String, Object> r : contextResults) {
+            String docId = extractDocId(r);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meta = (Map<String, Object>) r.get("metadata");
+            String chunkIndex = (meta != null) ? (String) meta.get("chunkIndex") : null;
+            double score = r.get("score") instanceof Number n ? n.doubleValue() : 0.0;
+            String preview = (String) r.get("textPreview");
+
+            sources.add(new SourceRef(
+                    docId != null ? docId : "未知文档",
+                    chunkIndex != null ? chunkIndex : "-",
+                    score,
+                    preview != null ? preview : ""
+            ));
+        }
+        return sources;
+    }
+
 
     /**
      * LLM-based reranking: ask chat model to select the most relevant chunk IDs.

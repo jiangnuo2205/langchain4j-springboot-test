@@ -3,11 +3,13 @@ package com.example.demo.web;
 import com.example.demo.service.RagService;
 import com.example.demo.web.dto.RagAskRequest;
 import com.example.demo.web.dto.RagAskResponse;
+import com.example.demo.web.dto.RagAskResponse1;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,12 +32,38 @@ public class RagController {
         return Map.of("chunksIndexed", count);
     }
 
+    @PostMapping("/ask1")
+    public RagAskResponse1 as1k(@Valid @RequestBody RagAskRequest req) {
+        List<String> chunks = ragService.retrieve(req.question());
+        String answer = ragService.ask1(req.question());
+        return new RagAskResponse1(req.question(), answer, chunks);
+    }
+// 2. 改写后的 Controller 方法
     @PostMapping("/ask")
     public RagAskResponse ask(@Valid @RequestBody RagAskRequest req) {
-        List<String> chunks = ragService.retrieve(req.question());
-        String answer = ragService.ask(req.question());
-        return new RagAskResponse(req.question(), answer, chunks);
+        RagService.RagAskResult result = ragService.ask(req.question());
+
+    // 将 RagService 内部的 SourceRef 转为 Controller 层的 SourceInfo（带编号）
+    List<RagAskResponse.SourceInfo> sources = new ArrayList<>();
+    for (int i = 0; i < result.sources().size(); i++) {
+        RagService.SourceRef ref = result.sources().get(i);
+        sources.add(new RagAskResponse.SourceInfo(
+                i + 1,                // [1], [2], [3] ...
+                ref.docId(),
+                ref.chunkIndex(),
+                ref.score(),
+                ref.textPreview()
+        ));
     }
+
+    return new RagAskResponse(
+            req.question(),
+            result.answer(),
+            sources,
+            result.topScore(),
+            result.belowThreshold()
+    );
+}
 
     /**
      * Debug retrieval quality: returns topK matches with scores and metadata.

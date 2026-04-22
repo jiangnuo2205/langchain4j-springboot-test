@@ -107,7 +107,7 @@ public class EvalRunner implements CommandLineRunner {
         String answer = null;
         if (Boolean.TRUE.equals(c.ask())) {
             try {
-                answer = ragService.ask(c.question());
+                answer = ragService.ask1(c.question());
             } catch (Exception e) {
                 answer = "ERROR: " + e.getMessage();
             }

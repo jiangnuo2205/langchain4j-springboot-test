@@ -9,7 +9,7 @@ lsof -nP -iTCP:8020 -sTCP:LISTEN
 # kill <PID>                  # 杀掉
 
 # 2. 删掉这一个服务的数据目录（只影响这个服务）
-# rm -rf /Volumes/G/rag-file/260401-spb-lang4j-rag-performance/chroma-data
+# rm -rf /Volumes/G/rag-file/langchain4j-springboot-test-rag-bge-m3-20260410/chroma-data
 
 # 3. 重启服务（会自动创建空目录）
 # ./start-chroma.sh
