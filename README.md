@@ -2,12 +2,17 @@
 
 > AI驱动的选品与获客策略升级 — 转化智能体 + 获客智能体 MVP
 
+页面一：客户管理面板：http://localhost:8090/trade-dashboard.html
 - 📊 Dashboard     — 统计概览
 - 👥 客户管理      — 列表/详情/AI分析分级
 - 📥 导入询盘(NEW) — PDF上传OCR + 文本粘贴 → 自动创建客户+沟通记录
 - 📡 雷达监测      — 成交抵达度 + 联络节点 + 信号分析
 - 🌐 网站分析      — URL爬取 → 客户画像 → 存库
-- 🎯 获客智能体    — 自然语言意图识别
+- 🎯 获客智能体（非对话式）    — 自然语言意图识别
+  
+页面二：获客智能体（对话式：含意图识别及业务员评估体系） http://localhost:8090/agent-chat.html
+- 🎯 对话式获客智能体    — 两层意图识别思维链+业务员评估体系
+
 
 ## 项目背景
 
@@ -88,6 +93,7 @@
 
 ## 客户生命周期管理系统
 可查看项目位置思维导图：langchain4j-springboot-test/REDME_DESIGN_HISTORY/外贸获客Demo思维导图.xmind
+框架图片：langchain4j-springboot-test/REDME_DESIGN_HISTORY/客户生命周期管理系统.jpg
 
 ## 业务模型详解
 
@@ -155,6 +161,62 @@ MVP 阶段怎么做（你两天内能实现的）：
 这些全部由 LLM 从沟通记录中自动判断，不需要人工打标签。
 
 
+
+## 获客Agent (3意图+1兜底)
+业务架构图片：langchain4j-springboot-test/REDME_DESIGN_HISTORY/获客智能体 对话式Agent架构.jpg
+
+### 获客Agent (3意图+1兜底) 核心难点和解法
+
+**1. 上下文管理（你提到的"避免每次载入所有信息"）**
+
+采用**滑动窗口 + 定期摘要**的策略：
+
+- 保留最近10条原始对话
+- 每10轮由LLM生成一次摘要，替换旧消息
+- System Prompt 中注入：摘要 + 业务员画像 + 当前评估状态
+
+**2. 意图识别两层**
+
+| 层级    | 功能                        | 示例                                   |
+| ------- | --------------------------- | -------------------------------------- |
+| L1 表层 | 分类为3种业务意图 + 1个兜底 | "找客户"/"促成交"/"创意获客"/"非业务"  |
+| L2 深层 | 识别对话背后的真实目标      | "客户担心资金安全" → 深层目标=风险规避 |
+
+
+| L1 场景分类     | L2 细分意图                                      | 示例输入                    |
+| --------------- | ------------------------------------------------ | --------------------------- |
+| **A: 找客户**   | 平台获客、展会获客、社媒获客、行业数据获客       | "我做杯垫，想找美国零售商"  |
+| **B: 促成交**   | 异议处理、价格谈判、信任建立、交期协商、付款方式 | "客户说担心资金安全"        |
+| **C: 创意获客** | 场景联想、跨界匹配、信息源推荐                   | "涂鸦+杯垫能有什么玩法"     |
+| **D: 兜底**     | 非外贸内容                                       | "帮我写个Python脚本" → 拒绝 |
+
+**3. 实时评估面板**
+
+每次AI回复时，同时返回结构化评估JSON，前端右侧面板实时更新。评估包含：意图链路、外贸人员能力评估、客户信息沉淀、下一步指引。
+
+### 获客Agent (3意图+1兜底) 核心设计要点
+
+**1. 两层意图识别**
+
+在 System Prompt 中定义了严格的意图分类，LLM 每次回复时必须同时输出评估JSON。L1 分为4类（找客户/促成交/创意获客/非业务），L2 识别深层目标（资金安全、风险承受等）。
+
+**2. 兜底机制**
+
+非业务内容 → intentL1 标记为 `OFF_TOPIC` → `validBusiness=false` → 不计入有效对话 → 不更新业务员画像。兜底回复是固定模板，告诉用户能力范围。
+
+**3. 上下文压缩**
+
+每20条消息触发一次摘要压缩。LLM 把旧对话压缩为300字摘要，注入 System Prompt。滑动窗口只保留最近10条原始消息。这样即使聊了100轮，context window 也不会爆。
+
+**4. 回复和评估分离**
+
+AI 回复用 `===EVALUATION===` 分隔符分成两部分。前端左侧只显示对话部分，右侧面板显示评估数据。每条消息后评估自动更新。
+
+**5. 业务员画像累积**
+
+每次有效对话都会更新 `salesperson_profile` 表：记录展现的能力、改进建议、经验等级。这个数据随时间积累，后续可以用于团队能力分析。
+
+
 ## 快速开始
 
 ### 1. 准备数据库
@@ -206,18 +268,28 @@ src/main/java/com/example/demo/
 ├── entity/
 │   ├── Customer.java
 │   └── CommunicationRecord.java
+│   ├── AgentSession.java          ← 获客智能体对话对象及对话画像
+│   ├── AgentMessage.java          ← 获客智能体对话记录
+│   └── SalespersonProfile.java    ← 业务员画像 
 ├── repository/
 │   ├── CustomerRepository.java
 │   └── CommunicationRecordRepository.java
+│   ├── AgentSessionRepository.java    ← 获客智能体 对话节
+│   ├── AgentMessageRepository.java    ← 获客智能体 对话记录
+│   └── SalespersonProfileRepository.java  ← 业务员画像
 ├── service/
-│   ├── CustomerAnalysisService.java    ← 转化：画像+分级
+│   ├── CustomerAnalysisService.java    ← 转化：客户画像+分级
 │   ├── CustomerRadarService.java       ← 雷达+抵达度+联络节点 (NEW)
 │   ├── IntentRecognitionService.java   ← 获客：意图识别
 │   └── WebsiteAnalysisService.java     ← 网站分析
+│   └── AcquisitionAgentService.java   ← 获客智能体逻辑 (核心)
 ├── controller/
-│   └── TradeController.java            ← 统一API (UPDATED)
+│   └── TradeController.java            ← 客户信息（不含意图识别） (UPDATED)
 src/main/resources/static/
 └── trade-dashboard.html                ← 前端 (UPDATED)
+└── agent-chat.html                    ← 获客智能体+业务员评估（3层意图识别+1 兜底）
+
+
 ```
 
 ### 
