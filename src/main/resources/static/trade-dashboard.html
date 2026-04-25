@@ -129,6 +129,26 @@
         .profile-card ul { padding-left: 16px; margin: 0; }
         .crawl-stats { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-top: 12px; }
         .crawl-stats span { display: flex; align-items: center; gap: 4px; }
+
+        /* ── Radar ──────────────────────────────────────── */
+        .radar-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+        .radar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .radar-header h3 { font-size: 16px; font-weight: 700; }
+        .deal-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+        .deal-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .deal-20 { background: #9ca3af; width: 20%; }
+        .deal-40 { background: var(--primary); width: 40%; }
+        .deal-60 { background: var(--warning); width: 60%; }
+        .deal-80 { background: var(--accent); width: 80%; }
+        .deal-100 { background: #16a34a; width: 100%; }
+        .signal-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 4px; margin: 2px; }
+        .signal-positive { background: var(--accent-light); color: var(--accent); }
+        .signal-negative { background: var(--danger-light); color: var(--danger); }
+        .signal-opportunity { background: var(--warning-light); color: var(--warning); }
+        .contact-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 10px; border-radius: 6px; font-weight: 500; }
+        .contact-urgent { background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger); }
+        .contact-soon { background: var(--warning-light); color: var(--warning); border: 1px solid var(--warning); }
+        .contact-normal { background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); }
     </style>
 </head>
 <body>
@@ -160,6 +180,8 @@
         <div class="tabs">
             <button class="tab" :class="{active: tab==='dashboard'}" @click="tab='dashboard'; loadStats()">📊 Dashboard</button>
             <button class="tab" :class="{active: tab==='customers'}" @click="tab='customers'; loadCustomers()">👥 客户管理</button>
+            <button class="tab" :class="{active: tab==='import'}" @click="tab='import'">📥 导入询盘</button>
+            <button class="tab" :class="{active: tab==='radar'}" @click="tab='radar'">📡 雷达监测</button>
             <button class="tab" :class="{active: tab==='website'}" @click="tab='website'">🌐 网站分析</button>
             <button class="tab" :class="{active: tab==='intent'}" @click="tab='intent'">🎯 获客智能体</button>
         </div>
@@ -230,6 +252,10 @@
                                 <span v-if="analyzingId===c.id"><span class="loading"></span></span>
                                 <span v-else>AI分析</span>
                             </button>
+                            <button class="btn btn-sm" style="color:var(--warning)" @click="radarSingle(c.id)" :disabled="radaringId===c.id">
+                                <span v-if="radaringId===c.id"><span class="loading"></span></span>
+                                <span v-else>📡雷达</span>
+                            </button>
                         </td>
                     </tr>
                     <tr v-if="customers.length===0">
@@ -237,6 +263,196 @@
                     </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- ═══ Import Tab ═══ -->
+        <div v-if="tab==='import'">
+            <div class="card">
+                <div class="card-title">📥 导入询盘/聊天记录</div>
+                <p class="hint" style="margin-bottom:16px">支持两种方式：上传PDF（阿里国际站截图/打印件，需本地安装OCR环境）或直接粘贴聊天记录文本。AI会自动识别买卖双方对话，提取客户信息，保存沟通历史。</p>
+
+                <!-- 方式选择 -->
+                <div style="display:flex;gap:8px;margin-bottom:16px">
+                    <button class="btn" :class="{active: importMode==='text','btn-primary': importMode==='text'}" @click="importMode='text'">📝 粘贴文本</button>
+                    <button class="btn" :class="{active: importMode==='pdf','btn-primary': importMode==='pdf'}" @click="importMode='pdf'">📄 上传PDF</button>
+                </div>
+
+                <!-- 文本输入模式 -->
+                <div v-if="importMode==='text'">
+                    <div style="margin-bottom:8px">
+                        <label style="font-size:13px;color:var(--text-secondary);margin-right:8px">来源渠道</label>
+                        <select v-model="importChannel" class="btn" style="padding:6px 10px;font-size:12px">
+                            <option value="alibaba">阿里国际站</option>
+                            <option value="email">邮件</option>
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="wechat">微信</option>
+                        </select>
+                    </div>
+                    <textarea class="intent-input" v-model="importText" style="min-height:200px"
+                              placeholder="粘贴聊天记录，例如：&#10;&#10;[2024-03-15 09:23] Mike Johnson:&#10;Hi, I'm looking for custom insulated tumblers with our logo. We need 5000 pieces. Can you send pricing?&#10;&#10;[2024-03-15 10:05] Sales Team:&#10;Dear Mike, Thank you for your inquiry. We offer custom insulated tumblers starting from $3.50/pc for 5000pcs. MOQ is 1000pcs..."></textarea>
+                    <button class="btn btn-primary" style="margin-top:12px" @click="runImportText" :disabled="importLoading || !importText.trim()">
+                        <span v-if="importLoading"><span class="loading"></span> AI分析中...</span>
+                        <span v-else>🤖 识别并导入</span>
+                    </button>
+                </div>
+
+                <!-- PDF上传模式 -->
+                <div v-if="importMode==='pdf'">
+                    <div style="border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;background:var(--bg)">
+                        <input type="file" accept=".pdf" @change="handlePdfFile" ref="pdfInput" style="display:none"/>
+                        <p style="font-size:14px;margin-bottom:8px">{{ pdfFileName || '点击选择PDF文件' }}</p>
+                        <button class="btn" @click="$refs.pdfInput.click()">选择文件</button>
+                        <p class="hint" style="margin-top:8px">需要本地安装 tesseract-ocr 和 pdf2image</p>
+                    </div>
+                    <button class="btn btn-primary" style="margin-top:12px" @click="runImportPdf" :disabled="importLoading || !pdfFile">
+                        <span v-if="importLoading"><span class="loading"></span> OCR + AI分析中...</span>
+                        <span v-else>📄 OCR识别并导入</span>
+                    </button>
+                </div>
+
+                <!-- 导入结果 -->
+                <div v-if="importResult" style="margin-top:20px">
+                    <div style="padding:12px;background:var(--accent-light);border-radius:8px;color:var(--accent);font-size:13px;margin-bottom:12px">
+                        ✅ 导入成功！客户：<strong>{{ importResult.companyName }}</strong>（ID: {{ importResult.customerId }}）
+                        · 创建 {{ importResult.recordsCreated }} 条沟通记录
+                        <span v-if="importResult.ocrMs"> · OCR {{ importResult.ocrMs }}ms</span>
+                        · LLM {{ importResult.llmMs }}ms
+                    </div>
+
+                    <!-- 提取的客户信息 -->
+                    <div class="profile-grid" v-if="importResult.extractedInfo">
+                        <div class="profile-card" v-if="importResult.extractedInfo.customerInfo">
+                            <h4>👤 识别出的客户信息</h4>
+                            <div v-for="(v,k) in importResult.extractedInfo.customerInfo" class="intent-field">
+                                <span class="intent-label">{{ k }}</span>
+                                <span class="intent-value">{{ v || '–' }}</span>
+                            </div>
+                        </div>
+                        <div class="profile-card" v-if="importResult.extractedInfo.summary">
+                            <h4>📊 沟通分析</h4>
+                            <div class="intent-field"><span class="intent-label">阶段</span><span class="intent-value"><span class="tag tag-blue">{{ importResult.extractedInfo.summary.stage }}</span></span></div>
+                            <div class="intent-field"><span class="intent-label">客户意向</span><span class="intent-value">{{ importResult.extractedInfo.summary.customerIntent }}</span></div>
+                            <div class="intent-field" v-if="importResult.extractedInfo.summary.keyProducts"><span class="intent-label">提到产品</span><span class="intent-value"><span class="tag tag-green" v-for="p in importResult.extractedInfo.summary.keyProducts">{{ p }}</span></span></div>
+                            <div class="intent-field"><span class="intent-label">下一步</span><span class="intent-value">{{ importResult.extractedInfo.summary.nextAction }}</span></div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:12px;display:flex;gap:8px">
+                        <button class="btn" @click="openDetail(importResult.customerId)">查看客户详情</button>
+                        <button class="btn btn-accent" @click="analyzeSingle(importResult.customerId); tab='customers'; loadCustomers()">立即AI分级</button>
+                    </div>
+                </div>
+
+                <div v-if="importError" style="margin-top:16px;padding:12px;background:var(--danger-light);border-radius:8px;color:var(--danger);font-size:13px">
+                    ❌ {{ importError }}
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Radar Tab ═══ -->
+        <div v-if="tab==='radar'">
+            <div class="actions-row">
+                <button class="btn btn-primary" @click="radarAll" :disabled="radarAllLoading">
+                    <span v-if="radarAllLoading"><span class="loading"></span> 批量评估中...</span>
+                    <span v-else>📡 批量雷达评估（已分级客户）</span>
+                </button>
+                <span class="hint" v-if="radarAllMsg">{{ radarAllMsg }}</span>
+            </div>
+
+            <!-- 单个客户雷达结果 -->
+            <div v-if="radarDetail" class="radar-card">
+                <div class="radar-header">
+                    <h3>{{ radarDetail.companyName }}</h3>
+                    <span class="contact-badge" :class="getContactUrgency(radarDetail.nextContactAt)">
+                        {{ radarDetail.contactSchedule }}
+                    </span>
+                </div>
+
+                <!-- 成交抵达度 -->
+                <div style="margin-bottom:12px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
+                        <span>成交抵达度</span>
+                        <span style="font-weight:700;font-size:18px">{{ radarDetail.dealReadiness }}%</span>
+                    </div>
+                    <div class="deal-bar">
+                        <div class="deal-bar-fill" :class="getDealBarClass(radarDetail.dealReadiness)" :style="{width: radarDetail.dealReadiness+'%'}"></div>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-secondary)">当前阶段：{{ radarDetail.dealStage }}</div>
+                </div>
+
+                <!-- 联络节点 -->
+                <div style="margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:13px">
+                    <div style="font-weight:500;margin-bottom:4px">📅 联络节点</div>
+                    <div>下次联系：{{ radarDetail.nextContactAt ? new Date(radarDetail.nextContactAt).toLocaleString() : '立即' }}</div>
+                    <div>联系方式：<span class="tag tag-blue">{{ radarDetail.contactMethod }}</span></div>
+                    <div v-if="radarDetail.contactTopic" style="margin-top:4px">话题：{{ radarDetail.contactTopic }}</div>
+                </div>
+
+                <!-- 信号列表 -->
+                <div v-if="radarDetail.signals && radarDetail.signals.length" style="margin-bottom:12px">
+                    <div style="font-size:13px;font-weight:500;margin-bottom:6px">🔔 检测到的信号</div>
+                    <span v-for="s in radarDetail.signals" class="signal-badge" :class="'signal-'+s.type">
+                        {{ s.type==='positive'?'✓':s.type==='negative'?'✗':'⚡' }}
+                        {{ s.description }} ({{ s.weight>0?'+':'' }}{{ s.weight }})
+                    </span>
+                </div>
+
+                <!-- AI 洞察 -->
+                <div v-if="radarDetail.aiInsight">
+                    <div style="font-size:13px;font-weight:500;margin-bottom:6px">🧠 AI 洞察</div>
+                    <pre style="white-space:pre-wrap;font-size:13px;line-height:1.7;background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border)">{{ radarDetail.aiInsight }}</pre>
+                </div>
+
+                <div class="hint" style="margin-top:8px">耗时 {{ radarDetail.costMs }}ms</div>
+            </div>
+
+            <!-- 批量结果列表 -->
+            <div v-if="radarResults.length" class="card" style="padding:0;overflow:hidden">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>公司</th>
+                        <th>抵达度</th>
+                        <th>阶段</th>
+                        <th>联络节点</th>
+                        <th>方式</th>
+                        <th>信号</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="r in radarResults" :key="r.customerId" style="cursor:pointer" @click="radarDetail=r">
+                        <td style="font-weight:500">{{ r.companyName }}</td>
+                        <td>
+                            <div style="display:flex;align-items:center;gap:6px">
+                                <div class="deal-bar" style="width:60px;height:6px;margin:0">
+                                    <div class="deal-bar-fill" :class="getDealBarClass(r.dealReadiness)" :style="{width:r.dealReadiness+'%'}"></div>
+                                </div>
+                                <span style="font-weight:700;font-size:13px">{{ r.dealReadiness }}%</span>
+                            </div>
+                        </td>
+                        <td><span class="tag tag-blue">{{ r.dealStage }}</span></td>
+                        <td>
+                            <span class="contact-badge" :class="getContactUrgency(r.nextContactAt)" style="font-size:11px;padding:2px 6px">
+                                {{ r.contactSchedule }}
+                            </span>
+                        </td>
+                        <td><span class="tag tag-green">{{ r.contactMethod }}</span></td>
+                        <td>
+                            <span v-if="r.signals">
+                                <span v-for="s in r.signals.slice(0,2)" class="signal-badge" :class="'signal-'+s.type" style="font-size:10px;padding:1px 4px">
+                                    {{ s.type==='positive'?'✓':s.type==='negative'?'✗':'⚡' }}
+                                </span>
+                                <span v-if="r.signals.length>2" class="hint">+{{ r.signals.length-2 }}</span>
+                            </span>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div v-if="!radarDetail && !radarResults.length" class="card" style="text-align:center;color:var(--text-secondary);padding:40px">
+                请先对客户执行"AI分析"进行分级，然后点击"批量雷达评估"或在客户列表中点击"📡雷达"
             </div>
         </div>
 
@@ -575,6 +791,96 @@ createApp({
         const websiteResult = ref(null);
         const websiteError = ref('');
 
+        // ── Radar ─────────────────────────────────────────
+        const radarDetail = ref(null);
+
+        // ── Import ────────────────────────────────────────
+        const importMode = ref('text');
+        const importText = ref('');
+        const importChannel = ref('alibaba');
+        const importLoading = ref(false);
+        const importResult = ref(null);
+        const importError = ref('');
+        const pdfFile = ref(null);
+        const pdfFileName = ref('');
+
+        function handlePdfFile(e) {
+            const f = e.target.files[0];
+            if (f) { pdfFile.value = f; pdfFileName.value = f.name; }
+        }
+
+        async function runImportText() {
+            importLoading.value = true; importResult.value = null; importError.value = '';
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/import-text`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: importText.value, channel: importChannel.value })
+                });
+                const d = await r.json();
+                if (d.error) { importError.value = d.error; }
+                else { importResult.value = d; loadStats(); }
+            } catch (e) { importError.value = '请求失败: ' + e.message; }
+            importLoading.value = false;
+        }
+
+        async function runImportPdf() {
+            if (!pdfFile.value) return;
+            importLoading.value = true; importResult.value = null; importError.value = '';
+            try {
+                const formData = new FormData();
+                formData.append('file', pdfFile.value);
+                const r = await fetch(`${baseUrl.value}/api/trade/import-pdf`, {
+                    method: 'POST', body: formData
+                });
+                const d = await r.json();
+                if (d.error) { importError.value = d.error; }
+                else { importResult.value = d; loadStats(); }
+            } catch (e) { importError.value = '请求失败: ' + e.message; }
+            importLoading.value = false;
+        }
+        const radarResults = ref([]);
+        const radarAllLoading = ref(false);
+        const radarAllMsg = ref('');
+        const radaringId = ref(null);
+
+        async function radarSingle(id) {
+            radaringId.value = id;
+            radarDetail.value = null;
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/customers/${id}/radar`, { method: 'POST' });
+                const d = await r.json();
+                radarDetail.value = d;
+                tab.value = 'radar';
+            } catch (e) { console.error('radarSingle', e); }
+            radaringId.value = null;
+        }
+
+        async function radarAll() {
+            radarAllLoading.value = true; radarAllMsg.value = ''; radarResults.value = [];
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/radar-all`, { method: 'POST' });
+                radarResults.value = await r.json();
+                radarAllMsg.value = `评估完成，${radarResults.value.length}个客户`;
+            } catch (e) { radarAllMsg.value = '错误: ' + e.message; }
+            radarAllLoading.value = false;
+        }
+
+        function getDealBarClass(readiness) {
+            if (readiness >= 80) return 'deal-80';
+            if (readiness >= 60) return 'deal-60';
+            if (readiness >= 40) return 'deal-40';
+            return 'deal-20';
+        }
+
+        function getContactUrgency(nextContactAt) {
+            if (!nextContactAt) return 'contact-urgent';
+            const diff = new Date(nextContactAt) - new Date();
+            if (diff <= 0) return 'contact-urgent';
+            if (diff <= 86400000) return 'contact-soon';
+            return 'contact-normal';
+        }
+
         async function runWebsiteAnalysis() {
             websiteLoading.value = true;
             websiteResult.value = null;
@@ -631,6 +937,10 @@ createApp({
             detailVisible, detail, openDetail,
             intentInput, intentLoading, intentResult, intentRaw, intentCostMs, runIntent,
             websiteUrl, websiteLoading, websiteResult, websiteError, runWebsiteAnalysis,
+            radarDetail, radarResults, radarAllLoading, radarAllMsg, radaringId,
+            radarSingle, radarAll, getDealBarClass, getContactUrgency,
+            importMode, importText, importChannel, importLoading, importResult, importError,
+            pdfFile, pdfFileName, handlePdfFile, runImportText, runImportPdf,
         };
     }
 }).mount('#app');

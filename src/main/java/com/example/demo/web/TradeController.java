@@ -5,12 +5,15 @@ import com.example.demo.entity.Customer;
 import com.example.demo.repository.CommunicationRecordRepository;
 import com.example.demo.repository.CustomerRepository;
 import com.example.demo.service.CustomerAnalysisService;
+import com.example.demo.service.CustomerRadarService;
+import com.example.demo.service.InquiryImportService;
 import com.example.demo.service.IntentRecognitionService;
 import com.example.demo.service.WebsiteAnalysisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,17 +37,23 @@ public class TradeController {
     private final CustomerAnalysisService analysisService;
     private final IntentRecognitionService intentService;
     private final WebsiteAnalysisService websiteAnalysisService;
+    private final CustomerRadarService radarService;
+    private final InquiryImportService inquiryImportService;
 
     public TradeController(CustomerRepository customerRepo,
                            CommunicationRecordRepository recordRepo,
                            CustomerAnalysisService analysisService,
                            IntentRecognitionService intentService,
-                           WebsiteAnalysisService websiteAnalysisService) {
+                           WebsiteAnalysisService websiteAnalysisService,
+                           CustomerRadarService radarService,
+                           InquiryImportService inquiryImportService) {
         this.customerRepo = customerRepo;
         this.recordRepo = recordRepo;
         this.analysisService = analysisService;
         this.intentService = intentService;
         this.websiteAnalysisService = websiteAnalysisService;
+        this.radarService = radarService;
+        this.inquiryImportService = inquiryImportService;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -168,6 +177,124 @@ public class TradeController {
             log.error("trade.website-analysis failed url={} err={}", url, e.getMessage(), e);
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 雷达监测 + 成交抵达度 + 联络节点
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 单个客户雷达评估：成交抵达度 + 联络节点 + 信号分析
+     * <p>
+     * POST /api/trade/customers/{id}/radar
+     */
+    @PostMapping("/customers/{id}/radar")
+    public ResponseEntity<Map<String, Object>> radarEvaluate(@PathVariable Long id) {
+        try {
+            CustomerRadarService.RadarResult result = radarService.evaluateCustomer(id);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("customerId", result.customerId());
+            response.put("companyName", result.companyName());
+            response.put("dealReadiness", result.dealReadiness());
+            response.put("dealStage", result.dealStage());
+            response.put("contactSchedule", result.contactSchedule());
+            response.put("nextContactAt", result.nextContactAt() != null ? result.nextContactAt().toString() : null);
+            response.put("contactMethod", result.contactMethod());
+            response.put("contactTopic", result.contactTopic());
+            response.put("signals", result.signals());
+            response.put("aiInsight", result.aiInsight());
+            response.put("costMs", result.costMs());
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            log.error("radar.evaluate failed customerId={} err={}", id, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * 批量雷达评估：所有已分级客户，按紧急度排序
+     * <p>
+     * POST /api/trade/radar-all
+     */
+    @PostMapping("/radar-all")
+    public List<Map<String, Object>> radarAll() {
+        List<CustomerRadarService.RadarResult> results = radarService.evaluateAllAndRank();
+        return results.stream().map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("customerId", r.customerId());
+            m.put("companyName", r.companyName());
+            m.put("dealReadiness", r.dealReadiness());
+            m.put("dealStage", r.dealStage());
+            m.put("contactSchedule", r.contactSchedule());
+            m.put("nextContactAt", r.nextContactAt() != null ? r.nextContactAt().toString() : null);
+            m.put("contactMethod", r.contactMethod());
+            m.put("contactTopic", r.contactTopic());
+            m.put("signals", r.signals());
+            return m;
+        }).toList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 询盘/聊天记录导入
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 上传PDF → OCR + LLM → 创建客户和沟通记录
+     */
+    @PostMapping("/import-pdf")
+    public ResponseEntity<Map<String, Object>> importPdf(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "请上传PDF文件"));
+        }
+        try {
+            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("inquiry_", ".pdf");
+            file.transferTo(tempFile.toFile());
+            java.nio.file.Path scriptPath = java.nio.file.Path.of("tools", "pdf_ocr_to_txt.py");
+
+            InquiryImportService.ImportResult result =
+                    inquiryImportService.importFromPdf(tempFile, scriptPath);
+            java.nio.file.Files.deleteIfExists(tempFile);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("customerId", result.customerId());
+            response.put("companyName", result.companyName());
+            response.put("recordsCreated", result.recordsCreated());
+            response.put("extractedInfo", result.extractedInfo());
+            response.put("ocrMs", result.ocrMs());
+            response.put("llmMs", result.llmMs());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("import-pdf failed err={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * 粘贴文本 → LLM分析 → 创建客户和沟通记录
+     */
+    @PostMapping("/import-text")
+    public ResponseEntity<Map<String, Object>> importText(@RequestBody Map<String, String> body) {
+        String text = body.getOrDefault("text", "");
+        String channel = body.getOrDefault("channel", "alibaba");
+        if (text.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "text is required"));
+        }
+        try {
+            InquiryImportService.ImportResult result =
+                    inquiryImportService.importFromText(text, channel);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("customerId", result.customerId());
+            response.put("companyName", result.companyName());
+            response.put("recordsCreated", result.recordsCreated());
+            response.put("extractedInfo", result.extractedInfo());
+            response.put("llmMs", result.llmMs());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("import-text failed err={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
 

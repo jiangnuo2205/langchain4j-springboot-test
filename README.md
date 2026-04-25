@@ -2,6 +2,13 @@
 
 > AI驱动的选品与获客策略升级 — 转化智能体 + 获客智能体 MVP
 
+- 📊 Dashboard     — 统计概览
+- 👥 客户管理      — 列表/详情/AI分析分级
+- 📥 导入询盘(NEW) — PDF上传OCR + 文本粘贴 → 自动创建客户+沟通记录
+- 📡 雷达监测      — 成交抵达度 + 联络节点 + 信号分析
+- 🌐 网站分析      — URL爬取 → 客户画像 → 存库
+- 🎯 获客智能体    — 自然语言意图识别
+
 ## 项目背景
 
 外贸公司（定制实物产品：杯垫、保温杯、户外用品等）面临三个核心痛点：
@@ -79,6 +86,75 @@
 - 输出包含：产品类型、目标市场、客户画像、推荐渠道、核心卖点、风险提醒
 - 信息不足时基于行业经验推断并标注"（推断）"
 
+## 客户生命周期管理系统
+可查看项目位置思维导图：langchain4j-springboot-test/REDME_DESIGN_HISTORY/外贸获客Demo思维导图.xmind
+
+## 业务模型详解
+
+### 1. 成交抵达度（Deal Readiness Score）
+
+这是**客户推进进度的量化评估**，本质是一个 0-100 的分数，由信号加权计算得出：
+
+| 阶段      | 抵达度 | 判定依据                         |
+| --------- | ------ | -------------------------------- |
+| 初步接触  | 20%    | 收到询盘但只问了一句话           |
+| 需求确认  | 40%    | 客户明确了品类、数量、或要了目录 |
+| 报价/样品 | 60%    | 我方已报价或寄样                 |
+| 谈判中    | 80%    | 在讨论价格/付款条件/交期         |
+| 成交      | 100%   | 下单                             |
+
+AI 从沟通记录中**自动识别关键信号**来判定当前阶段，比如客户说了"send me samples"就是60%的信号，说了"your price is acceptable"就是80%的信号。
+
+### 2. 联络节点（Contact Schedule）
+
+**基于客户所处阶段 + 雷达信号，自动计算下一次应该联系客户的时间和方式：**
+
+- S1 首次触达 → 24小时内必须回复（黄金窗口）
+- S2 深度沟通 → 3-5天跟进一次
+- S3 报价/样品阶段 → 7天催促（"Have you received the samples?"）
+- S4 谈判阶段 → 按约定时间节点
+
+**雷达事件可以触发"打断性联络"**：比如实时监测到客户官网新增了一个产品线，这就是一个切入机会，系统应该立刻提醒销售跟进。
+
+### 3. 雷达监测的信号收集链路
+
+MVP 阶段怎么做（你两天内能实现的）：
+
+**离线雷达** → 已有数据，直接分析：
+
+- 把历史询盘/邮件导入 `communication_record` 表
+- LLM 分析沟通记录，提取：情感倾向、需求变化、响应速度
+
+**实时雷达** → MVP 阶段用"定时爬取网站"模拟：
+
+- 复用你已有的 `WebsiteAnalysisService`，定期爬取客户官网
+- 对比前后两次爬取结果，识别变化（新产品线、新招聘等）
+
+### 联络节点和成交抵达度的信号收集链路
+
+信号全部从**已有数据**中提取：
+
+**离线信号（从 communication_record 表）→ LLM 自动识别：**
+
+- 客户说"send samples" → 成交抵达度跳到 60%
+- 客户说"price is acceptable" → 跳到 80%
+- 客户主动联系次数多 → positive 信号
+- 超过30天没回复 → negative 信号
+
+**实时信号（从 WebsiteAnalysisService）→ 定期爬取对比：**
+
+- 官网新增产品线 → opportunity 信号，触发立即联络
+- 招聘采购岗 → opportunity 信号
+
+**联络节点计算逻辑：**
+
+- 根据 dealStage 确定基础间隔（24h/3天/7天）
+- 如果有 opportunity 信号 → 覆盖为"立即联络"
+- 最终输出：具体时间 + 联系方式 + 话题建议
+
+这些全部由 LLM 从沟通记录中自动判断，不需要人工打标签。
+
+
 ## 快速开始
 
 ### 1. 准备数据库
@@ -123,6 +199,8 @@ spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
 
 将以下文件复制到对应目录：
 
+### 
+
 ```
 src/main/java/com/example/demo/
 ├── entity/
@@ -132,14 +210,17 @@ src/main/java/com/example/demo/
 │   ├── CustomerRepository.java
 │   └── CommunicationRecordRepository.java
 ├── service/
-│   ├── CustomerAnalysisService.java
-│   └── IntentRecognitionService.java
+│   ├── CustomerAnalysisService.java    ← 转化：画像+分级
+│   ├── CustomerRadarService.java       ← 雷达+抵达度+联络节点 (NEW)
+│   ├── IntentRecognitionService.java   ← 获客：意图识别
+│   └── WebsiteAnalysisService.java     ← 网站分析
 ├── controller/
-│   └── TradeController.java
-
+│   └── TradeController.java            ← 统一API (UPDATED)
 src/main/resources/static/
-└── trade-dashboard.html
+└── trade-dashboard.html                ← 前端 (UPDATED)
 ```
+
+### 
 
 ### 5. 启动并测试
 

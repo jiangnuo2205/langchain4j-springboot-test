@@ -3,7 +3,6 @@ package com.example.demo.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatModel;
-import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -20,7 +19,6 @@ import java.util.Map;
  * <p>
  * 模拟高级顾问思维，理解表层诉求背后的深层目标。
  */
-
 @Service
 public class IntentRecognitionService {
 
@@ -40,10 +38,8 @@ public class IntentRecognitionService {
     ) {}
 
     /**
-     * P（1）：解析用户的获客意图。
-     * todo：Helen 待优化点：缺少外部资料支持（具体有效线索）、而非LLM直接回答
-     * todo:Helen 缺少：意图识别：模拟高级顾问思维，理解用户表层诉求背后的深层目标（如资金安全、风险承受能力），避免机械响应。
-     * todo：缺少：兜底
+     * 解析用户的获客意图。
+     *
      * @param userInput 用户的自然语言描述，支持白话文
      */
     public IntentResult recognizeIntent(String userInput) {
