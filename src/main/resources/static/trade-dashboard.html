@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>AI外贸智能体 · 转化 & 获客</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+    <style>
+        :root {
+            --bg: #f0f2f5;
+            --card-bg: #ffffff;
+            --border: #e5e7eb;
+            --text: #1a1a2e;
+            --text-secondary: #6b7280;
+            --primary: #1e40af;
+            --primary-light: #dbeafe;
+            --accent: #059669;
+            --accent-light: #d1fae5;
+            --warning: #d97706;
+            --warning-light: #fef3c7;
+            --danger: #dc2626;
+            --danger-light: #fee2e2;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+            --radius: 10px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Noto Sans SC', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+        /* ── Header ─────────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 50%, #2563eb 100%);
+            color: white; padding: 16px 24px; position: sticky; top: 0; z-index: 100;
+            box-shadow: 0 2px 8px rgba(30,64,175,0.3);
+        }
+        .header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 18px; font-weight: 700; }
+        .header .subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+        .header-badge { font-size: 11px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); padding: 4px 10px; border-radius: 20px; }
+
+        /* ── Container ──────────────────────────────────── */
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+        /* ── Tabs ────────────────────────────────────────── */
+        .tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--card-bg); border-radius: var(--radius); padding: 4px; box-shadow: var(--shadow); }
+        .tab { flex: 1; padding: 10px 16px; text-align: center; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.15s; border: none; background: transparent; color: var(--text-secondary); }
+        .tab.active { background: var(--primary); color: white; }
+        .tab:hover:not(.active) { background: var(--primary-light); color: var(--primary); }
+
+        /* ── Stats Cards ────────────────────────────────── */
+        .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat-card { background: var(--card-bg); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); text-align: center; }
+        .stat-card .num { font-size: 28px; font-weight: 700; }
+        .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+        .stat-card.grade-a .num { color: var(--accent); }
+        .stat-card.grade-b .num { color: var(--primary); }
+        .stat-card.grade-c .num { color: var(--warning); }
+        .stat-card.grade-d .num { color: var(--danger); }
+
+        /* ── Card / Table ───────────────────────────────── */
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 16px; }
+        .card-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border); color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        tr:hover { background: #f8fafc; }
+
+        /* ── Grade Badge ────────────────────────────────── */
+        .grade { display: inline-block; width: 28px; height: 28px; line-height: 28px; text-align: center; border-radius: 6px; font-weight: 700; font-size: 13px; }
+        .grade-A { background: var(--accent-light); color: var(--accent); }
+        .grade-B { background: var(--primary-light); color: var(--primary); }
+        .grade-C { background: var(--warning-light); color: var(--warning); }
+        .grade-D { background: var(--danger-light); color: var(--danger); }
+        .grade-none { background: #f3f4f6; color: #9ca3af; }
+
+        /* ── Buttons ────────────────────────────────────── */
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn-primary:hover { background: #1e3a8a; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-accent { background: var(--accent); color: white; border-color: var(--accent); }
+        .btn-accent:hover { background: #047857; }
+        .actions-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+
+        /* ── Detail Panel ───────────────────────────────── */
+        .detail-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 200; display: flex; justify-content: flex-end; }
+        .detail-panel { width: 580px; max-width: 90vw; background: var(--card-bg); height: 100vh; overflow-y: auto; padding: 24px; box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
+        .detail-panel h2 { font-size: 18px; margin-bottom: 16px; }
+        .detail-section { margin-bottom: 20px; }
+        .detail-section h3 { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        .detail-section pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; padding: 12px; border-radius: 8px; font-size: 13px; line-height: 1.7; border: 1px solid var(--border); }
+        .record-item { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+        .record-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+        .record-content { font-size: 13px; line-height: 1.6; }
+
+        /* ── Intent (获客) ──────────────────────────────── */
+        .intent-input { width: 100%; min-height: 80px; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; resize: vertical; background: var(--bg); line-height: 1.6; }
+        .intent-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30,64,175,0.1); }
+        .intent-result { margin-top: 16px; }
+        .intent-field { display: flex; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+        .intent-label { font-weight: 500; min-width: 100px; color: var(--text-secondary); flex-shrink: 0; }
+        .intent-value { flex: 1; }
+        .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin: 2px; }
+        .tag-blue { background: var(--primary-light); color: var(--primary); }
+        .tag-green { background: var(--accent-light); color: var(--accent); }
+        .tag-amber { background: var(--warning-light); color: var(--warning); }
+
+        /* ── Loading ────────────────────────────────────── */
+        .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .hint { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+
+        /* ── Settings ───────────────────────────────────── */
+        .settings-row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+        .settings-row label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+        .settings-row input { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--card-bg); width: 260px; }
+
+        /* ── Website Analysis ───────────────────────────── */
+        .url-input-row { display: flex; gap: 8px; align-items: stretch; }
+        .url-input { flex: 1; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--bg); }
+        .url-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30,64,175,0.1); }
+        .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+        .profile-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+        .profile-card h4 { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; }
+        .profile-card p, .profile-card li { font-size: 13px; line-height: 1.7; }
+        .profile-card ul { padding-left: 16px; margin: 0; }
+        .crawl-stats { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-top: 12px; }
+        .crawl-stats span { display: flex; align-items: center; gap: 4px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-inner">
+            <div>
+                <h1>AI 外贸智能体</h1>
+                <div class="subtitle">转化智能体 · 获客智能体 · AI驱动选品与获客策略</div>
+            </div>
+            <div class="header-badge">LangChain4j + DashScope</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Settings -->
+        <div class="settings-row">
+            <label>后端地址</label>
+            <input v-model="baseUrl" />
+            <button class="btn" @click="initDemo" :disabled="demoLoading">
+                <span v-if="demoLoading"><span class="loading"></span></span>
+                <span v-else>初始化Demo数据</span>
+            </button>
+            <span class="hint">{{ demoMsg }}</span>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab" :class="{active: tab==='dashboard'}" @click="tab='dashboard'; loadStats()">📊 Dashboard</button>
+            <button class="tab" :class="{active: tab==='customers'}" @click="tab='customers'; loadCustomers()">👥 客户管理</button>
+            <button class="tab" :class="{active: tab==='website'}" @click="tab='website'">🌐 网站分析</button>
+            <button class="tab" :class="{active: tab==='intent'}" @click="tab='intent'">🎯 获客智能体</button>
+        </div>
+
+        <!-- ═══ Dashboard Tab ═══ -->
+        <div v-if="tab==='dashboard'">
+            <div class="stats-row">
+                <div class="stat-card"><div class="num">{{ stats.totalCustomers || 0 }}</div><div class="label">总客户数</div></div>
+                <div class="stat-card grade-a"><div class="num">{{ stats.gradeA || 0 }}</div><div class="label">A级 · 高意向</div></div>
+                <div class="stat-card grade-b"><div class="num">{{ stats.gradeB || 0 }}</div><div class="label">B级 · 培育中</div></div>
+                <div class="stat-card grade-c"><div class="num">{{ stats.gradeC || 0 }}</div><div class="label">C级 · 待了解</div></div>
+                <div class="stat-card grade-d"><div class="num">{{ stats.gradeD || 0 }}</div><div class="label">D级 · 低优先</div></div>
+                <div class="stat-card"><div class="num" style="color:#9ca3af">{{ stats.ungraded || 0 }}</div><div class="label">未分级</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">系统说明</div>
+                <div style="font-size:13px;line-height:1.8;color:var(--text-secondary)">
+                    <p><strong>转化智能体（P0）：</strong>读取客户历史沟通记录 → AI生成客户画像 → 自动分级(A/B/C/D) → 生成个性化跟进话术。直接影响短期成交。</p>
+                    <p style="margin-top:8px"><strong>获客智能体（P1）：</strong>接受自然语言输入（如"我做瑜伽垫想卖去澳洲"）→ AI解析意图 → 输出目标客户画像和获客策略建议。</p>
+                    <p style="margin-top:8px"><strong>操作流程：</strong>① 点击"初始化Demo数据"插入5个模拟客户 → ② 进入客户管理，点击"AI分析"生成画像和分级 → ③ 切换获客智能体测试意图识别</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Customers Tab ═══ -->
+        <div v-if="tab==='customers'">
+            <div class="actions-row">
+                <button class="btn btn-primary" @click="analyzeAll" :disabled="analyzeAllLoading">
+                    <span v-if="analyzeAllLoading"><span class="loading"></span> 批量分析中...</span>
+                    <span v-else>🤖 批量AI分析（未分级）</span>
+                </button>
+                <button class="btn" @click="loadCustomers">🔄 刷新</button>
+                <select class="btn" v-model="gradeFilter" @change="loadCustomers" style="padding:7px 12px">
+                    <option value="">全部等级</option>
+                    <option value="A">A级</option>
+                    <option value="B">B级</option>
+                    <option value="C">C级</option>
+                    <option value="D">D级</option>
+                </select>
+                <span class="hint" v-if="analyzeAllMsg">{{ analyzeAllMsg }}</span>
+            </div>
+
+            <div class="card" style="padding:0;overflow:hidden">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>等级</th>
+                        <th>公司名称</th>
+                        <th>联系人</th>
+                        <th>国家</th>
+                        <th>行业</th>
+                        <th>来源</th>
+                        <th>操作</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="c in customers" :key="c.id">
+                        <td><span class="grade" :class="'grade-'+(c.grade||'none')">{{ c.grade || '–' }}</span></td>
+                        <td style="font-weight:500">{{ c.companyName }}</td>
+                        <td>{{ c.contactName || '–' }}</td>
+                        <td>{{ c.country || '–' }}</td>
+                        <td>{{ c.industry || '–' }}</td>
+                        <td><span class="tag tag-blue">{{ c.source || '–' }}</span></td>
+                        <td>
+                            <button class="btn btn-sm" @click="openDetail(c.id)">详情</button>
+                            <button class="btn btn-sm btn-accent" @click="analyzeSingle(c.id)" :disabled="analyzingId===c.id">
+                                <span v-if="analyzingId===c.id"><span class="loading"></span></span>
+                                <span v-else>AI分析</span>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr v-if="customers.length===0">
+                        <td colspan="7" style="text-align:center;color:var(--text-secondary);padding:40px">暂无客户数据，请先初始化Demo数据</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ═══ Website Analysis Tab ═══ -->
+        <div v-if="tab==='website'">
+            <div class="card">
+                <div class="card-title">🌐 客户网站分析</div>
+                <p class="hint" style="margin-bottom:12px">输入客户网站URL，AI会自动爬取网站内容，分析公司背景、产品品类、企业实力，生成客户画像并自动存入数据库。</p>
+
+                <div class="url-input-row">
+                    <input class="url-input" v-model="websiteUrl"
+                           placeholder="输入客户网站地址，如 https://www.leonardo.co.uk/" 
+                           @keyup.enter="runWebsiteAnalysis" />
+                    <button class="btn btn-primary" @click="runWebsiteAnalysis" 
+                            :disabled="websiteLoading || !websiteUrl.trim()" 
+                            style="white-space:nowrap;padding:12px 24px">
+                        <span v-if="websiteLoading"><span class="loading"></span> 分析中...</span>
+                        <span v-else>🔍 开始分析</span>
+                    </button>
+                </div>
+
+                <div v-if="websiteLoading" style="margin-top:16px;color:var(--text-secondary);font-size:13px">
+                    <p>⏳ 正在爬取网站内容并调用AI分析，预计需要 15-30 秒...</p>
+                    <p style="margin-top:4px;font-size:12px">流程：爬取首页+子页面 → 提取关键信息 → LLM生成客户画像 → 存入数据库</p>
+                </div>
+
+                <!-- 分析结果 -->
+                <div v-if="websiteResult" style="margin-top:20px">
+                    <!-- 统计信息 -->
+                    <div class="crawl-stats">
+                        <span>📄 爬取 {{ websiteResult.pagesCrawled }} 个页面</span>
+                        <span>🕷️ 爬取耗时 {{ websiteResult.crawlMs }}ms</span>
+                        <span>🤖 AI分析耗时 {{ websiteResult.llmMs }}ms</span>
+                        <span>⏱️ 总耗时 {{ websiteResult.totalMs }}ms</span>
+                        <span>💾 已存入数据库 ID:{{ websiteResult.customerId }}</span>
+                    </div>
+
+                    <!-- 客户画像卡片 -->
+                    <div class="profile-grid" v-if="websiteResult.profile">
+                        <div class="profile-card" style="grid-column:1/-1">
+                            <h4>📋 画像总结</h4>
+                            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                                <span style="font-size:18px;font-weight:700">{{ websiteResult.profile.companyName || '未知' }}</span>
+                                <span class="grade" :class="'grade-'+(websiteResult.profile.grade||'none')">{{ websiteResult.profile.grade || '–' }}</span>
+                                <span class="tag tag-blue">{{ websiteResult.profile.country || '' }}</span>
+                                <span class="tag tag-green">{{ websiteResult.profile.businessModel || '' }}</span>
+                            </div>
+                            <p>{{ websiteResult.profile.profileSummary }}</p>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>🏢 公司背景</h4>
+                            <p><strong>行业：</strong>{{ websiteResult.profile.industry || '–' }}</p>
+                            <p><strong>规模：</strong>{{ websiteResult.profile.companySize || '–' }}</p>
+                            <p><strong>历史：</strong>{{ websiteResult.profile.companyHistory || '–' }}</p>
+                            <p v-if="websiteResult.profile.contactInfo"><strong>联系：</strong>{{ websiteResult.profile.contactInfo }}</p>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>📦 经营品类</h4>
+                            <ul v-if="Array.isArray(websiteResult.profile.productCategories)">
+                                <li v-for="cat in websiteResult.profile.productCategories">{{ cat }}</li>
+                            </ul>
+                            <p v-else>{{ websiteResult.profile.productCategories || '–' }}</p>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>🎯 潜在需求</h4>
+                            <ul v-if="Array.isArray(websiteResult.profile.potentialNeeds)">
+                                <li v-for="need in websiteResult.profile.potentialNeeds">{{ need }}</li>
+                            </ul>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>✅ 可匹配产品</h4>
+                            <ul v-if="Array.isArray(websiteResult.profile.matchingProducts)">
+                                <li v-for="p in websiteResult.profile.matchingProducts">{{ p }}</li>
+                            </ul>
+                        </div>
+
+                        <div class="profile-card" style="grid-column:1/-1">
+                            <h4>💡 切入策略</h4>
+                            <p>{{ websiteResult.profile.approachStrategy || '–' }}</p>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>📊 分级理由</h4>
+                            <p>{{ websiteResult.profile.gradeReason || '–' }}</p>
+                        </div>
+
+                        <div class="profile-card">
+                            <h4>⚠️ 风险提醒</h4>
+                            <ul v-if="Array.isArray(websiteResult.profile.riskFactors)">
+                                <li v-for="r in websiteResult.profile.riskFactors" style="color:var(--warning)">{{ r }}</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:16px;display:flex;gap:8px">
+                        <button class="btn" @click="openDetail(websiteResult.customerId)">查看客户详情</button>
+                        <button class="btn btn-accent" @click="tab='customers';loadCustomers()">返回客户列表</button>
+                    </div>
+                </div>
+
+                <!-- 错误信息 -->
+                <div v-if="websiteError" style="margin-top:16px;padding:12px;background:var(--danger-light);border-radius:8px;color:var(--danger);font-size:13px">
+                    ❌ {{ websiteError }}
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Intent Tab (获客智能体) ═══ -->
+        <div v-if="tab==='intent'">
+            <div class="card">
+                <div class="card-title">🎯 获客意图识别</div>
+                <p class="hint" style="margin-bottom:12px">用自然语言描述你的获客需求，AI会像资深顾问一样解析你的真实意图并给出建议。</p>
+                <textarea class="intent-input" v-model="intentInput"
+                          placeholder="例如：&#10;• 我朋友做钓鱼竿想卖去美国&#10;• 我有一批瑜伽垫，想找澳洲的经销商&#10;• 我们做宠物用品，想开拓欧洲市场，预算10万"></textarea>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+                    <button class="btn btn-primary" @click="runIntent" :disabled="intentLoading || !intentInput.trim()">
+                        <span v-if="intentLoading"><span class="loading"></span> AI分析中...</span>
+                        <span v-else>🚀 分析获客意图</span>
+                    </button>
+                    <span class="hint" v-if="intentCostMs">耗时 {{ intentCostMs }}ms</span>
+                </div>
+
+                <div class="intent-result" v-if="intentResult">
+                    <div class="detail-section">
+                        <h3>📋 结构化分析结果</h3>
+                        <div v-if="intentResult.productType" class="intent-field">
+                            <span class="intent-label">产品类型</span>
+                            <span class="intent-value">{{ intentResult.productType }}</span>
+                        </div>
+                        <div v-if="intentResult.targetMarkets" class="intent-field">
+                            <span class="intent-label">目标市场</span>
+                            <span class="intent-value"><span class="tag tag-green" v-for="m in intentResult.targetMarkets">{{ m }}</span></span>
+                        </div>
+                        <div v-if="intentResult.targetCustomerProfile" class="intent-field">
+                            <span class="intent-label">客户画像</span>
+                            <span class="intent-value">
+                                {{ intentResult.targetCustomerProfile.industryType }} ·
+                                {{ intentResult.targetCustomerProfile.companyScale }} ·
+                                {{ intentResult.targetCustomerProfile.buyerRole }}
+                            </span>
+                        </div>
+                        <div v-if="intentResult.suggestedChannels" class="intent-field">
+                            <span class="intent-label">推荐渠道</span>
+                            <span class="intent-value"><span class="tag tag-blue" v-for="ch in intentResult.suggestedChannels">{{ ch }}</span></span>
+                        </div>
+                        <div v-if="intentResult.keySellingPoints" class="intent-field">
+                            <span class="intent-label">核心卖点</span>
+                            <span class="intent-value"><span class="tag tag-amber" v-for="p in intentResult.keySellingPoints">{{ p }}</span></span>
+                        </div>
+                        <div v-if="intentResult.riskWarnings" class="intent-field">
+                            <span class="intent-label">风险提醒</span>
+                            <span class="intent-value" style="color:var(--danger)">
+                                <div v-for="w in intentResult.riskWarnings">⚠ {{ w }}</div>
+                            </span>
+                        </div>
+                        <div v-if="intentResult.recommendedApproach" class="intent-field">
+                            <span class="intent-label">切入策略</span>
+                            <span class="intent-value">{{ intentResult.recommendedApproach }}</span>
+                        </div>
+                        <div v-if="intentResult.confidenceLevel" class="intent-field">
+                            <span class="intent-label">置信度</span>
+                            <span class="intent-value">
+                                <span class="tag" :class="{'tag-green':intentResult.confidenceLevel==='HIGH','tag-amber':intentResult.confidenceLevel==='MEDIUM','tag-blue':intentResult.confidenceLevel==='LOW'}">
+                                    {{ intentResult.confidenceLevel }}
+                                </span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Fallback: show raw response if parsing failed -->
+                <div v-if="intentRaw && !intentResult" class="detail-section" style="margin-top:16px">
+                    <h3>AI 原始分析</h3>
+                    <pre style="white-space:pre-wrap;font-size:13px;line-height:1.7;background:#f8fafc;padding:12px;border-radius:8px">{{ intentRaw }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Detail Slide-over Panel ═══ -->
+    <div class="detail-overlay" v-if="detailVisible" @click.self="detailVisible=false">
+        <div class="detail-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2>{{ detail.customer?.companyName }}</h2>
+                <button class="btn btn-sm" @click="detailVisible=false">✕ 关闭</button>
+            </div>
+
+            <div v-if="detail.customer">
+                <!-- 基本信息 -->
+                <div class="detail-section">
+                    <h3>基本信息</h3>
+                    <div class="intent-field"><span class="intent-label">联系人</span><span class="intent-value">{{ detail.customer.contactName }} · {{ detail.customer.email }}</span></div>
+                    <div class="intent-field"><span class="intent-label">国家</span><span class="intent-value">{{ detail.customer.country }}</span></div>
+                    <div class="intent-field"><span class="intent-label">行业</span><span class="intent-value">{{ detail.customer.industry }}</span></div>
+                    <div class="intent-field"><span class="intent-label">规模</span><span class="intent-value">{{ detail.customer.companySize }}</span></div>
+                    <div class="intent-field"><span class="intent-label">感兴趣产品</span><span class="intent-value">{{ detail.customer.productInterest }}</span></div>
+                    <div class="intent-field"><span class="intent-label">来源</span><span class="intent-value"><span class="tag tag-blue">{{ detail.customer.source }}</span></span></div>
+                    <div class="intent-field">
+                        <span class="intent-label">等级</span>
+                        <span class="intent-value"><span class="grade" :class="'grade-'+(detail.customer.grade||'none')">{{ detail.customer.grade || '未分级' }}</span></span>
+                    </div>
+                </div>
+
+                <!-- AI 画像 -->
+                <div class="detail-section" v-if="detail.customer.aiProfile">
+                    <h3>🤖 AI 客户画像</h3>
+                    <pre>{{ detail.customer.aiProfile }}</pre>
+                </div>
+
+                <!-- 分级理由 -->
+                <div class="detail-section" v-if="detail.customer.gradeReason">
+                    <h3>📊 分级理由</h3>
+                    <pre>{{ detail.customer.gradeReason }}</pre>
+                </div>
+
+                <!-- 跟进建议 -->
+                <div class="detail-section" v-if="detail.customer.followUpSuggestion">
+                    <h3>💡 跟进建议</h3>
+                    <pre>{{ detail.customer.followUpSuggestion }}</pre>
+                </div>
+
+                <!-- 沟通记录 -->
+                <div class="detail-section">
+                    <h3>📧 沟通记录 ({{ detail.records?.length || 0 }})</h3>
+                    <div v-for="r in detail.records" :key="r.id" class="record-item">
+                        <div class="record-meta">
+                            <span class="tag" :class="r.direction==='inbound'?'tag-green':'tag-blue'">
+                                {{ r.direction==='inbound'?'客户→我方':'我方→客户' }}
+                            </span>
+                            {{ r.channel }} · {{ r.communicatedAt ? new Date(r.communicatedAt).toLocaleString() : '' }}
+                        </div>
+                        <div class="record-content">{{ r.content }}</div>
+                    </div>
+                    <div v-if="!detail.records?.length" class="hint">暂无沟通记录</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, onMounted } = Vue;
+
+createApp({
+    setup() {
+        const baseUrl = ref('http://localhost:8090');
+        const tab = ref('dashboard');
+
+        // ── Stats ──────────────────────────────────────────
+        const stats = ref({});
+        async function loadStats() {
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/stats`);
+                stats.value = await r.json();
+            } catch (e) { console.error('loadStats', e); }
+        }
+
+        // ── Demo ──────────────────────────────────────────
+        const demoLoading = ref(false);
+        const demoMsg = ref('');
+        async function initDemo() {
+            demoLoading.value = true; demoMsg.value = '';
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/init-demo`, { method: 'POST' });
+                const d = await r.json();
+                demoMsg.value = d.message + ' (' + (d.customers || 0) + '个客户)';
+                loadStats(); loadCustomers();
+            } catch (e) { demoMsg.value = '错误: ' + e.message; }
+            demoLoading.value = false;
+        }
+
+        // ── Customers ──────────────────────────────────────
+        const customers = ref([]);
+        const gradeFilter = ref('');
+        async function loadCustomers() {
+            try {
+                const url = gradeFilter.value
+                    ? `${baseUrl.value}/api/trade/customers?grade=${gradeFilter.value}`
+                    : `${baseUrl.value}/api/trade/customers`;
+                const r = await fetch(url);
+                customers.value = await r.json();
+            } catch (e) { console.error('loadCustomers', e); }
+        }
+
+        // ── Analyze single ─────────────────────────────────
+        const analyzingId = ref(null);
+        async function analyzeSingle(id) {
+            analyzingId.value = id;
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/customers/${id}/analyze`, { method: 'POST' });
+                const d = await r.json();
+                console.log('analysis result', d);
+                loadCustomers(); loadStats();
+            } catch (e) { console.error('analyzeSingle', e); }
+            analyzingId.value = null;
+        }
+
+        // ── Analyze all ────────────────────────────────────
+        const analyzeAllLoading = ref(false);
+        const analyzeAllMsg = ref('');
+        async function analyzeAll() {
+            analyzeAllLoading.value = true; analyzeAllMsg.value = '';
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/analyze-all`, { method: 'POST' });
+                const d = await r.json();
+                analyzeAllMsg.value = `已分析 ${d.analyzed} 个客户`;
+                loadCustomers(); loadStats();
+            } catch (e) { analyzeAllMsg.value = '错误: ' + e.message; }
+            analyzeAllLoading.value = false;
+        }
+
+        // ── Detail panel ──────────────────────────────────
+        const detailVisible = ref(false);
+        const detail = ref({});
+        async function openDetail(id) {
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/customers/${id}`);
+                detail.value = await r.json();
+                detailVisible.value = true;
+            } catch (e) { console.error('openDetail', e); }
+        }
+
+        // ── Intent (获客) ─────────────────────────────────
+        const intentInput = ref('');
+        const intentLoading = ref(false);
+        const intentResult = ref(null);
+        const intentRaw = ref('');
+        const intentCostMs = ref(0);
+
+        // ── Website Analysis ──────────────────────────────
+        const websiteUrl = ref('');
+        const websiteLoading = ref(false);
+        const websiteResult = ref(null);
+        const websiteError = ref('');
+
+        async function runWebsiteAnalysis() {
+            websiteLoading.value = true;
+            websiteResult.value = null;
+            websiteError.value = '';
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/analyze-website`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: websiteUrl.value })
+                });
+                const d = await r.json();
+                if (d.error) {
+                    websiteError.value = d.error;
+                } else {
+                    websiteResult.value = d;
+                    loadStats();
+                }
+            } catch (e) {
+                websiteError.value = '请求失败: ' + e.message;
+            }
+            websiteLoading.value = false;
+        }
+        async function runIntent() {
+            intentLoading.value = true;
+            intentResult.value = null; intentRaw.value = ''; intentCostMs.value = 0;
+            try {
+                const r = await fetch(`${baseUrl.value}/api/trade/intent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ input: intentInput.value })
+                });
+                const d = await r.json();
+                intentCostMs.value = d.costMs || 0;
+                intentRaw.value = d.rawResponse || '';
+                // parsed 可能是结构化的 JSON，也可能只有 rawAnalysis
+                if (d.parsed && d.parsed.productType) {
+                    intentResult.value = d.parsed;
+                } else if (d.parsed) {
+                    intentResult.value = null; // show raw
+                }
+            } catch (e) { intentRaw.value = '错误: ' + e.message; }
+            intentLoading.value = false;
+        }
+
+        onMounted(() => { loadStats(); });
+
+        return {
+            baseUrl, tab,
+            stats, loadStats,
+            demoLoading, demoMsg, initDemo,
+            customers, gradeFilter, loadCustomers,
+            analyzingId, analyzeSingle,
+            analyzeAllLoading, analyzeAllMsg, analyzeAll,
+            detailVisible, detail, openDetail,
+            intentInput, intentLoading, intentResult, intentRaw, intentCostMs, runIntent,
+            websiteUrl, websiteLoading, websiteResult, websiteError, runWebsiteAnalysis,
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
