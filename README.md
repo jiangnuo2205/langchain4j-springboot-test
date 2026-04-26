@@ -43,6 +43,7 @@
 │   客户列表 · AI分析 · 分级展示 · 获客意图识别            │
 └────────────┬──────────────────────┬──────────────────┘
              │ REST API             │
+             │/trade-dashboard.html │/agent-chat.html
 ┌────────────▼──────────┐ ┌────────▼──────────────────┐
 │   转化智能体 (P0)      │ │   获客智能体 (P1)          │
 │                        │ │                            │
@@ -215,6 +216,36 @@ AI 回复用 `===EVALUATION===` 分隔符分成两部分。前端左侧只显示
 **5. 业务员画像累积**
 
 每次有效对话都会更新 `salesperson_profile` 表：记录展现的能力、改进建议、经验等级。这个数据随时间积累，后续可以用于团队能力分析。
+
+
+## 🌐 网站分析
+## 网站分析功能工作流程
+
+```
+用户输入 URL（如 https://www.leonardo.co.uk/）
+    │
+    ▼
+Jsoup 爬取首页 + /about + /contact + /categories 等子页面（最多5个）
+    │  提取：title、meta、导航分类、h1-h3、正文段落、联系信息
+    │
+    ▼
+构建 Prompt → 调用 DashScope LLM
+    │  Prompt 含：我方产品线、分级标准、要求JSON输出
+    │
+    ▼
+解析 LLM 返回的结构化 JSON
+    │  companyName / country / grade / productCategories / approachStrategy ...
+    │
+    ▼
+自动创建 Customer 实体 → 写入 MySQL
+    │  source 字段标记为 "website_analysis"
+    │
+    ▼
+前端展示：画像卡片 + 分级 + 匹配产品 + 切入策略 + 风险提醒
+```
+
+
+## 
 
 
 ## 快速开始
